@@ -1,0 +1,20 @@
+# Configuration for MVTec AD Dataset Preprocessing Pipeline
+dataset:
+  name: "mvtec_ad"
+  root_dir: "./mvtec_ad"           # Path to extracted MVTec AD folder
+  categories: []                   # Empty list means all available categories
+  split_ratio: 0.8                 # 80% train / 20% val for anomaly images
+  include_good_train: true         # Include defect-free images in train set
+  good_ratio: 0.15                 # Ratio of good images to defect count (0.15 = 15%)
+  seed: 42
+
+export:
+  output_dir: "./datasets/processed/mvtec_baseline"
+  format: "yolo_seg"
+  save_debug_masks: true           # Save mask PNGs for visual inspection
+  image_format: "png"
+  min_contour_points: 3
+
+pipeline:
+  # Processors to apply (can be enabled/disabled)
+  processors: []

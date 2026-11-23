@@ -1,0 +1,269 @@
+\documentclass[12pt,a4paper,oneside]{report}
+
+% --- Gói ngôn ngữ và bảng mã ---
+\usepackage[utf8]{inputenc}
+\usepackage[vietnamese,shorthands=off]{babel}
+\usepackage[T5]{fontenc}
+
+% --- Định dạng trang và căn lề ---
+\usepackage[a4paper, top=2.5cm, bottom=2.5cm, left=3.0cm, right=2.0cm]{geometry}
+
+% --- Toán học và ký hiệu ---
+\usepackage{amsmath, amsfonts, amssymb, mathtools}
+
+% --- Hình ảnh và đồ họa ---
+\usepackage{graphicx}
+\usepackage{subcaption}
+\graphicspath{{figures/}{../runs/verification/visualizations/}}
+
+% --- Bảng biểu chuẩn mực ---
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{tabularx}
+\usepackage{longtable}
+\usepackage{array}
+
+% --- Đánh số đối tượng ---
+\usepackage{chngcntr}
+\counterwithout{table}{chapter}     % Bảng 1, Bảng 2 liên tục toàn bài
+\counterwithin{figure}{chapter}     % Hình 1.1, Hình 2.1 theo chương
+\counterwithout{equation}{chapter}  % Công thức 1, Công thức 2 liên tục toàn bài
+\renewcommand{\thetable}{\arabic{table}}
+\renewcommand{\thefigure}{\arabic{chapter}.\arabic{figure}}
+\renewcommand{\theequation}{\arabic{equation}}
+
+% --- Tùy biến Caption ---
+\usepackage{caption}
+\captionsetup[figure]{name=Hình, labelsep=period}
+\captionsetup[table]{name=Bảng, labelsep=period}
+
+% --- Đánh số chương số La Mã ---
+\renewcommand{\thechapter}{\Roman{chapter}}
+
+% --- Định dạng tiêu đề mục và chương thuần LaTeX (không phụ thuộc titlesec) ---
+\makeatletter
+% Dấu chấm sau số mục
+\renewcommand{\@seccntformat}[1]{\csname the#1\endcsname\quad}
+
+% Tiêu đề chương có số: CHƯƠNG I: TÊN CHƯƠNG
+\def\@makechapterhead#1{%
+  \vspace*{10\p@}%
+  {\parindent \z@ \centering \normalfont
+    \ifnum \c@secnumdepth >\m@ne
+        \Large\bfseries CHƯƠNG \thechapter: \MakeUppercase{#1}
+        \par\nobreak
+        \vskip 20\p@
+    \fi
+  }}
+
+% Tiêu đề chương không số: MỞ ĐẦU, KẾT LUẬN, TÀI LIỆU THAM KHẢO
+\def\@makeschapterhead#1{%
+  \vspace*{10\p@}%
+  {\parindent \z@ \centering \normalfont
+    \Large\bfseries \MakeUppercase{#1}\par\nobreak
+    \vskip 20\p@
+  }}
+\makeatother
+
+% Cấp mục và mục con: Có dấu chấm sau mọi số mục
+\renewcommand{\thesection}{\arabic{chapter}.\arabic{section}.}
+\renewcommand{\thesubsection}{\arabic{chapter}.\arabic{section}.\arabic{subsection}.}
+\renewcommand{\thesubsubsection}{\arabic{chapter}.\arabic{section}.\arabic{subsection}.\arabic{subsubsection}.}
+
+% --- Khoảng cách dòng và thụt lề ---
+\renewcommand{\baselinestretch}{1.3}
+\setlength{\parindent}{1.0cm}
+\setlength{\parskip}{4pt}
+
+% --- Siêu liên kết và mục lục ---
+\usepackage{hyperref}
+\hypersetup{
+    colorlinks=true,
+    linkcolor=black,
+    citecolor=blue,
+    urlcolor=blue,
+    pdftitle={Báo cáo cuối kỳ học phần Xử lý ảnh - INT14123_CLC},
+    pdfauthor={Nguyễn Đức Nghiêm - N23DCAT047}
+}
+
+% --- Bắt đầu tài liệu ---
+\begin{document}
+\shorthandoff{"}
+
+% ==============================================================================
+% TRANG BÌA CHÍNH
+% ==============================================================================
+\begin{titlepage}
+\begin{center}
+    \textbf{\large BỘ THÔNG TIN VÀ TRUYỀN THÔNG}\\[0.2cm]
+    \textbf{\large HỌC VIỆN CÔNG NGHỆ BƯU CHÍNH VIỄN THÔNG}\\[0.2cm]
+    \textbf{\large KHOA CÔNG NGHỆ THÔNG TIN 2}\\[0.2cm]
+    \textbf{--------------------  *  --------------------}\\[2.0cm]
+
+    \vspace{0.5cm}
+    \includegraphics[width=0.25\textwidth]{figures/logo_ptit.png}\\[1.2cm]
+    
+    \textbf{\Large BÁO CÁO CUỐI KỲ HỌC PHẦN}\\[0.3cm]
+    \textbf{\large HỌC PHẦN: INT14123\_CLC -- XỬ LÝ ẢNH (IMAGE PROCESSING)}\\[1.0cm]
+
+    \textbf{\LARGE NGHIÊN CỨU VÀ TRIỂN KHAI CÁC PHƯƠNG PHÁP XỬ LÝ ẢNH, BIẾN ĐỔI MIỀN TẦN SỐ VÀ SINH MẪU TỔNG HỢP CHO PHÂN VÙNG KHUYẾT TẬT BỀ MẶT CÔNG NGHIỆP}\\[1.5cm]
+
+    \begin{table}[h]
+    \centering
+    \begin{tabular}{ll}
+        \textbf{Giảng viên hướng dẫn:} & Huỳnh Trung Trụ \\[0.2cm]
+        \textbf{Sinh viên thực hiện:}  & Nguyễn Đức Nghiêm \\[0.2cm]
+        \textbf{Mã số sinh viên (MSSV):} & N23DCAT047 \\[0.2cm]
+        \textbf{Lớp sinh hoạt:}        & E23QCNCNTT01-N \\[0.2cm]
+        \textbf{Môi trường huấn luyện:} & Google Colab Cloud GPU (NVIDIA A100) \\
+    \end{tabular}
+    \end{table}
+
+    \vfill
+    \textbf{\large TP. HỒ CHÍ MINH, NĂM 2026}
+\end{center}
+\end{titlepage}
+
+% ==============================================================================
+% TRANG PHỤ BÌA
+% ==============================================================================
+\newpage
+\thispagestyle{empty}
+\begin{center}
+    \textbf{\large BỘ THÔNG TIN VÀ TRUYỀN THÔNG}\\[0.2cm]
+    \textbf{\large HỌC VIỆN CÔNG NGHỆ BƯU CHÍNH VIỄN THÔNG}\\[0.2cm]
+    \textbf{\large KHOA CÔNG NGHỆ THÔNG TIN 2}\\[2.0cm]
+
+    \textbf{\Large BÁO CÁO CUỐI KỲ HỌC PHẦN}\\[0.3cm]
+    \textbf{\large HỌC PHẦN: INT14123\_CLC -- XỬ LÝ ẢNH}\\[1.5cm]
+
+    \textbf{\LARGE NGHIÊN CỨU VÀ TRIỂN KHAI CÁC PHƯƠNG PHÁP XỬ LÝ ẢNH, BIẾN ĐỔI MIỀN TẦN SỐ VÀ SINH MẪU TỔNG HỢP CHO PHÂN VÙNG KHUYẾT TẬT BỀ MẶT CÔNG NGHIỆP}\\[2.0cm]
+
+    \begin{flushright}
+    \begin{minipage}{0.65\textwidth}
+        \textbf{Cán bộ chấm thi:}\\[0.1cm]
+        Giảng viên phụ trách: Huỳnh Trung Trụ ........................................\\[0.8cm]
+        \textbf{Sinh viên thực hiện:}\\[0.1cm]
+        Họ và tên: Nguyễn Đức Nghiêm -- MSSV: N23DCAT047\\[0.1cm]
+        Lớp: E23QCNCNTT01-N
+    \end{minipage}
+    \end{flushright}
+
+    \vfill
+    \textbf{\large TP. HỒ CHÍ MINH, THÁNG 11 NĂM 2026}
+\end{center}
+
+% ==============================================================================
+% LỜI CAM ĐOAN
+% ==============================================================================
+\newpage
+\chapter*{LỜI CAM ĐOAN}
+\addcontentsline{toc}{chapter}{LỜI CAM ĐOAN}
+
+Tôi xin cam đoan rằng toàn bộ nội dung được trình bày trong bản báo cáo cuối kỳ học phần Xử lý ảnh (mã học phần INT14123\_CLC) này là kết quả nghiên cứu, tìm hiểu lý thuyết và cài đặt thực nghiệm độc lập của chính bản thân tôi dưới sự định hướng học thuật của Giảng viên Huỳnh Trung Trụ.
+
+Các mô-đun tiền xử lý ảnh, biến đổi miền tần số 2D-FFT, biến đổi sóng con 2D-DWT, các thuật toán sinh khuyết tật tổng hợp CutPaste, DRAEM, NSA và bộ benchmark suy thoái quang học MVTec-AD-C đều được đối chiếu, cài đặt trung thực dựa trên mã nguồn thực tế của dự án. Tất cả các dữ liệu thực nghiệm đã xác minh và các phần chờ thực nghiệm đều được phân loại minh bạch, không có bất kỳ hành vi sao chép trái phép hay bịa đặt số liệu khoa học nào.
+
+Nếu có bất kỳ sự gian lận hay vi phạm quy chế học thuật nào, tôi xin chịu hoàn toàn trách nhiệm trước Hội đồng đánh giá và Khoa Công nghệ thông tin 2 -- Học viện Công nghệ Bưu chính Viễn thông.
+
+\vspace{1.5cm}
+\begin{flushright}
+    \textit{TP. Hồ Chí Minh, ngày 23 tháng 11 năm 2026}\\
+    \textbf{Sinh viên thực hiện}\\
+    \vspace{2.0cm}
+    \textbf{Nguyễn Đức Nghiêm}\\
+    MSSV: N23DCAT047
+\end{flushright}
+
+% ==============================================================================
+% LỜI CẢM ƠN
+% ==============================================================================
+\newpage
+\chapter*{LỜI CẢM ƠN}
+\addcontentsline{toc}{chapter}{LỜI CẢM ƠN}
+
+Lời đầu tiên, em xin gửi lời cảm ơn chân thành và sâu sắc nhất tới Thầy \textbf{Huỳnh Trung Trụ}, giảng viên phụ trách học phần Xử lý ảnh (mã HP INT14123\_CLC). Trong suốt quá trình học tập, Thầy đã tận tình truyền đạt những kiến thức toán học và nguyên lý xử lý ảnh số nền tảng, trang bị cho em tư duy phân tích tín hiệu đa chiều và phương pháp luận giải quyết các bài toán thị giác máy tính thực tế.
+
+Em cũng xin trân trọng cảm ơn các Thầy, Cô giáo thuộc Khoa Công nghệ thông tin 2 -- Học viện Công nghệ Bưu chính Viễn thông đã tạo điều kiện học tập tốt nhất, cung cấp môi trường học thuật chất lượng để em có cơ hội nghiên cứu và hoàn thành tốt bài tập lớn cuối kỳ môn học này.
+
+Mặc dù đã rất nỗ lực tìm hiểu tài liệu và hoàn thiện hệ thống thực nghiệm, bản báo cáo khó tránh khỏi những thiếu sót nhất định do hạn chế về thời gian và kinh nghiệm thực tiễn. Em kính mong nhận được những nhận xét, góp ý quý báu từ Thầy để bài báo cáo được hoàn thiện hơn và giúp em tích lũy thêm kiến thức trên con đường học tập sau này.
+
+Em xin chân thành cảm ơn Thầy!
+
+\vspace{1.5cm}
+\begin{flushright}
+    \textit{Sinh viên: Nguyễn Đức Nghiêm}
+\end{flushright}
+
+% ==============================================================================
+% MỤC LỤC & DANH MỤC TRA CỨU
+% ==============================================================================
+\newpage
+\tableofcontents
+
+\newpage
+\listoffigures
+\addcontentsline{toc}{chapter}{\listfigurename}
+
+\newpage
+\listoftables
+\addcontentsline{toc}{chapter}{\listtablename}
+
+% ==============================================================================
+% DANH MỤC TỪ VIẾT TẮT
+% ==============================================================================
+\newpage
+\chapter*{DANH MỤC TỪ VIẾT TẮT}
+\addcontentsline{toc}{chapter}{DANH MỤC TỪ VIẾT TẮT}
+
+\begin{table}[h]
+\centering
+\begin{tabularx}{\textwidth}{l p{5.5cm} X}
+\toprule
+\textbf{Từ viết tắt} & \textbf{Thuật ngữ tiếng Anh} & \textbf{Ý nghĩa tiếng Việt} \\
+\midrule
+AD & Anomaly Detection & Phát hiện bất thường / khuyết tật \\
+AUROC & Area Under the Receiver Operating Characteristic & Diện tích dưới đường cong ROC \\
+DWT & Discrete Wavelet Transform & Biến đổi sóng con rời rạc \\
+DRAEM & Discriminative Reconstruction-based Anomaly Embedding Model & Mô hình nhúng bất thường dựa trên tái tạo phân biệt \\
+FAR & False Alarm Rate & Tỷ lệ báo động giả trên mẫu lành \\
+FFT & Fast Fourier Transform & Biến đổi Fourier nhanh \\
+GPU & Graphics Processing Unit & Bộ xử lý đồ họa chuyên dụng \\
+IDWT & Inverse Discrete Wavelet Transform & Biến đổi sóng con rời rạc nghịch đảo \\
+IFFT & Inverse Fast Fourier Transform & Biến đổi Fourier nhanh nghịch đảo \\
+IoU & Intersection over Union & Tỉ số giữa diện tích giao và diện tích hợp \\
+MAE & Mean Absolute Error & Sai số tuyệt đối trung bình \\
+mAP & Mean Average Precision & Độ chính xác trung bình toàn diện \\
+MSE & Mean Squared Error & Sai số toàn phương trung bình \\
+MVTec AD & MVTec Anomaly Detection Dataset & Tập dữ liệu phát hiện khuyết tật MVTec \\
+NSA & Natural Synthetic Anomalies & Khuyết tật tổng hợp tự nhiên \\
+PSNR & Peak Signal-to-Noise Ratio & Tỷ số tín hiệu cực đại trên nhiễu \\
+ROC & Receiver Operating Characteristic & Đường cong đặc tính hoạt động của bộ thu \\
+SSIM & Structural Similarity Index Measure & Chỉ số đo lường độ tương đồng cấu trúc \\
+YOLO & You Only Look Once & Mạng nơ-ron phát hiện đối tượng thời gian thực \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+% ==============================================================================
+% NỘI DUNG CHÍNH CỦA BÁO CÁO
+% ==============================================================================
+\newpage
+\input{sections/introduction.tex}
+
+\newpage
+\input{chapters/chapter1.tex}
+
+\newpage
+\input{chapters/chapter2.tex}
+
+\newpage
+\input{chapters/chapter3.tex}
+
+\newpage
+\input{sections/conclusion.tex}
+
+\newpage
+\input{sections/references.tex}
+
+\end{document}

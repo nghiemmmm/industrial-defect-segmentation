@@ -1,0 +1,65 @@
+\chapter*{MỞ ĐẦU}
+\addcontentsline{toc}{chapter}{MỞ ĐẦU}
+
+\section*{1. Lý do chọn đề tài}
+
+Trong bối cảnh nền công nghiệp chế tạo và sản xuất hiện đại (Công nghiệp 4.0), quá trình tự động hóa quy trình kiểm tra chất lượng sản phẩm (Quality Assurance -- QA / Quality Control -- QC) đóng vai trò quyết định đối với năng suất và uy tín của các nhà máy chế tạo. Từ các linh kiện cơ khí chính xác như bu-lông, ốc vít (`screw`), vi mạch điện tử, vỉ thuốc y tế (`pill`), cho đến các sản phẩm bề mặt vật liệu như vải dệt (`carpet`), lưới thép (`grid`), gạch men (`tile`), các lỗi bề mặt như vết nứt vỡ, trầy xước, đứt sợi hay lỗ thủng xuất hiện với tỷ lệ rất nhỏ (thường chỉ dưới $1\% - 2\%$ trong dây chuyền vận hành ổn định). Tuy nhiên, nếu để lọt các sản phẩm khuyết tật ra thị trường, hậu quả có thể gây tổn thất kinh tế nghiêm trọng hoặc đe dọa trực tiếp đến an toàn vận hành của hệ thống thiết bị.
+
+Phương pháp kiểm tra truyền thống phụ thuộc chủ yếu vào mắt thường của công nhân thường bộc lộ những nhược điểm cố hữu: tính chủ quan, tốc độ xử lý chậm, dễ mệt mỏi dẫn đến bỏ sót lỗi sau thời gian dài làm việc. Sự phát triển của các kỹ thuật xử lý ảnh số và thị giác máy tính mở ra giải pháp kiểm tra tự động hóa với tốc độ cao và độ chính xác vượt trội. Tuy nhiên, việc áp dụng các mô hình học máy và thị giác máy tính vào môi trường sản xuất thực tế đối mặt với những thách thức lớn:
+\begin{enumerate}
+    \item \textbf{Sự mất cân bằng dữ liệu cực đoan (Extreme Class Imbalance):} Dữ liệu thu thập từ camera nhà xưởng hầu như chỉ bao gồm ảnh sản phẩm lành (Normal/Good images), trong khi mẫu khuyết tật thực tế cực kỳ hiếm hoi và không thể bao quát hết mọi hình thái lỗi phát sinh trong tương lai.
+    \item \textbf{Nhiễu nền tuần hoàn (Periodic Background Noise):} Trên các sản phẩm kết cấu bề mặt lặp lại (như lưới kim loại hay sợi dệt), thông tin hoa văn nền có năng lượng rất lớn, lấn át các tín hiệu biến đổi cục bộ của khuyết tật nhỏ.
+    \item \textbf{Suy thoái quang học trong điều kiện thực tế (Optical Degradations):} Rung chấn băng chuyền, sai lệch tiêu cự thấu kính và nhiễu nhiệt cảm biến camera trong môi trường nhà xưởng làm suy giảm chất lượng ảnh thu nhận, khiến các thuật toán phân vùng hoạt động kém ổn định.
+\end{enumerate}
+
+Xuất phát từ thực tiễn trên, đề tài \textbf{"Nghiên cứu và triển khai các phương pháp xử lý ảnh, biến đổi miền tần số và sinh mẫu tổng hợp cho phân vùng khuyết tật bề mặt công nghiệp"} được lựa chọn nhằm nghiên cứu có hệ thống các thuật toán xử lý ảnh cổ điển (lọc triệt tiêu đỉnh phổ tuần hoàn 2D-FFT, phân tách dải tần số 2D-DWT) kết hợp với các thuật toán sinh khuyết tật tổng hợp dựa trên giải tích vi phân và hình học (CutPaste, DRAEM, NSA). Nghiên cứu giải quyết bài toán phát hiện và phân vùng khuyết tật mức điểm ảnh mà không làm rò rỉ dữ liệu kiểm thử (Zero Data Leakage), đồng thời bảo toàn độ bền vững trước các biến dạng quang học công nghiệp.
+
+\section*{2. Tổng quan vấn đề}
+
+Trong xử lý ảnh và thị giác máy tính công nghiệp, bài toán kiểm tra bất thường (Anomaly Detection) ban đầu được tiếp cận dưới dạng phân lớp ảnh (Image-level Classification), tức chỉ trả lời câu hỏi: \textit{"Ảnh chụp sản phẩm này lành hay lỗi?"}. Mặc dù hướng tiếp cận này cung cấp thông tin tổng quan, nó không chỉ ra được vị trí tọa độ chính xác, diện tích tổn hại hay biên dạng hình học của vùng hư hỏng.
+
+Do đó, xu hướng công nghệ hiện đại dịch chuyển mạnh mẽ sang bài toán phân vùng bất thường mức điểm ảnh (Pixel-level Anomaly Segmentation). Mục tiêu là tạo ra một mặt nạ nhị phân hoặc đa giác bao quanh chính xác từng vết nứt, vết ố hay lỗ thủng trên bề mặt.
+
+Để vượt qua rào cản khan hiếm dữ liệu lỗi, hai hướng tiếp cận chính đã được phát triển trong những năm gần đây:
+\begin{itemize}
+    \item \textbf{Hướng tiếp cận tái tạo (Reconstruction-based):} Huấn luyện các mạng tự mã hóa (Autoencoders) hoặc GAN trên dữ liệu lành để học cách tái tạo bề mặt chuẩn, sau đó trừ ảnh đầu vào cho ảnh tái tạo để tìm lỗi. Tuy nhiên, hướng tiếp cận này thường gặp hiện tượng ảnh tái tạo bị mờ biên cạnh (blurring) hoặc mạng nơ-ron vô tình "tái tạo" luôn cả vùng khuyết tật nếu lỗi có diện tích lớn.
+    \item \textbf{Hướng tiếp cận sinh mẫu khuyết tật tổng hợp (Synthetic-based Anomaly Generation):} Tận dụng chính các ảnh sản phẩm lành ban đầu, sử dụng các thuật toán xử lý ảnh hình học, trường vô hướng ngẫu nhiên hoặc giải phương trình vi phân để cấy ghép các khuyết tật giả lập có thuộc tính quang học tự nhiên. Cách tiếp cận này biến bài toán học không giám sát thành bài toán học phân vùng có giám sát đầy đủ (Supervised Instance Segmentation), mở đường cho việc áp dụng các kiến trúc phân vùng đối tượng tiên tiến như YOLOv11-seg.
+\end{itemize}
+
+Đề tài này tập trung nghiên cứu sâu hướng tiếp cận sinh khuyết tật tổng hợp, kết hợp đồng thời với các giải pháp lọc miền tần số nhằm khử nhiễu nền và tăng cường chi tiết biên dạng, tạo nên một quy trình xử lý ảnh khép kín và mạnh mẽ.
+
+\section*{3. Mục tiêu thực hiện}
+
+Đề tài đặt ra các mục tiêu kỹ thuật và học thuật cụ thể sau:
+\begin{itemize}
+    \item \textbf{Mục tiêu 1 -- Nghiên cứu lý thuyết và cài đặt các thuật toán sinh khuyết tật (Group A):} Nghiên cứu nguyên lý toán học và cài đặt độc lập 3 thuật toán sinh mẫu khuyết tật tổng hợp từ ảnh lành: CutPaste (Normal \& Scar), DRAEM (đa tỉ lệ Perlin noise kết hợp Beta blending) và NSA (ghép khuyết tật liền mạch dựa trên giải phương trình vi phân Poisson).
+    \item \textbf{Mục tiêu 2 -- Nghiên cứu và cài đặt xử lý miền tần số (Group B):} Làm chủ lý thuyết biến đổi Fourier 2D rời rạc (2D-FFT) để thiết kế bộ lọc chặn dải Notch thích nghi triệt tiêu đỉnh phổ tuần hoàn của kết cấu lặp lại; ứng dụng biến đổi sóng con rời rạc (2D-DWT) phân tách 4 dải con và khuếch đại dải chi tiết cao để tăng cường độ tương phản vết nứt nhỏ.
+    \item \textbf{Mục tiêu 3 -- Thiết lập benchmark đánh giá độ bền quang học (Group C):} Hiện thực hóa quy trình kiểm thử MVTec-AD-C với 4 loại suy thoái quang học công nghiệp (nhiễu Gauss, làm mờ Gauss, mờ chuyển động, mất nét quang học) qua 5 mức độ nghiêm trọng đơn điệu.
+    \item \textbf{Mục tiêu 4 -- Xây dựng khung thực nghiệm ma trận và đánh giá đa miền (Group D):} Thiết kế và thực thi ma trận thực nghiệm gồm 12 kịch bản (từ EXP-00 đến EXP-11); xây dựng hệ thống đo lường kép (Dual-Domain Evaluation) kết hợp giữa độ chính xác phân vùng thực thể (Mask mAP@50, mAP@50-95) và bản đồ xác suất liên tục (Pixel-AUROC, Image-AUROC, FAR@0.25).
+\end{itemize}
+
+\section*{4. Đối tượng và phạm vi thực hiện}
+
+\subsection*{4.1. Đối tượng nghiên cứu}
+\begin{itemize}
+    \item \textbf{Dữ liệu ảnh số công nghiệp:} Tập dữ liệu tiêu chuẩn quốc tế MVTec Anomaly Detection (MVTec AD) bao gồm các ảnh RGB độ phân giải cao chụp các bề mặt sản phẩm thực tế.
+    \item \textbf{Các thuật toán xử lý ảnh và toán học giải tích:} Phép biến đổi Fourier rời rạc 2 chiều (2D-DFT/2D-FFT); phép biến đổi sóng con rời rạc 2 chiều (2D-DWT Haar / Daubechies); phương trình đạo hàm riêng giải tích vi phân Poisson trong xử lý ảnh liền mạch; thuật toán tạo hàm gradient Perlin ngẫu nhiên đa quãng tám.
+    \item \textbf{Mô hình phân vùng thực thể:} Kiến trúc mạng nơ-ron tích chập phân vùng đối tượng thời gian thực YOLOv11-seg.
+\end{itemize}
+
+\subsection*{4.2. Phạm vi thực hiện}
+\begin{itemize}
+    \item \textbf{Phạm vi dữ liệu thực nghiệm:} Kiểm chứng chuyên sâu trên 6 danh mục sản phẩm đại diện tiêu biểu của MVTec AD, bao gồm 3 lớp kết cấu bề mặt lặp lại (`grid`, `carpet`, `tile`) và 3 lớp vật thể công nghiệp (`screw`, `pill`, `bottle`) với tổng số 2,857 ảnh thực tế.
+    \item \textbf{Cam kết Zero Data Leakage tuyệt đối:} Toàn bộ quá trình sinh mẫu khuyết tật tổng hợp và lọc tần số chỉ sử dụng dữ liệu từ tập ảnh lành huấn luyện (`train/good`). Toàn bộ ảnh khuyết tật thực tế và mặt nạ ground-truth trong tập `test` được đóng băng độc lập 100\% để làm căn cứ đánh giá năng lực ngoại suy (out-of-distribution generalization).
+    \item \textbf{Phân bổ hạ tầng tính toán:} Các thuật toán xử lý ảnh, biến đổi tần số, trích xuất đa giác và bộ test tự động được phát triển và kiểm chứng cục bộ trên CPU máy trạm Windows (\texttt{./venv}, Python 3.11.9). Quá trình huấn luyện mô hình sâu YOLOv11-seg được triển khai trên môi trường điện toán đám mây Google Colab với bộ gia tốc GPU NVIDIA A100 (16/40GB).
+\end{itemize}
+
+\section*{5. Phương pháp thực hiện}
+
+Quá trình thực hiện đề tài được tổ chức theo phương pháp luận khoa học chặt chẽ, kết hợp giữa nghiên cứu lý thuyết giải tích và cài đặt thực nghiệm:
+\begin{itemize}
+    \item \textbf{Phương pháp nghiên cứu lý thuyết:} Đọc hiểu, phân tích các công thức toán học từ các bài báo khoa học gốc về biến đổi Fourier, sóng con Wavelet, Poisson Image Editing, Perlin Noise và quy trình đánh giá MVTec AD.
+    \item \textbf{Phương pháp cài đặt và kiểm thử phần mềm:} Xây dựng mã nguồn module hóa bằng Python thuần kết hợp thư viện khoa học (NumPy, OpenCV, PyWavelets, SciPy). Áp dụng phương pháp kiểm thử tự động hóa thông qua `pytest` (đạt 34/34 bài kiểm thử đơn vị và tích hợp).
+    \item \textbf{Phương pháp kiểm chứng trực quan (Visual Inspection):} Xuất các ảnh montage trực quan đa thành phần (ảnh gốc, ảnh xử lý, mặt nạ nhị phân, phổ tần số, bản đồ sai lệch) để thẩm định chất lượng quang học bằng mắt thường.
+    \item \textbf{Phương pháp nghiên cứu cắt bỏ (Ablation Study):} Thiết kế ma trận 12 thực nghiệm có kiểm soát biến số độc lập nhằm bóc tách định lượng mức độ đóng góp của từng nhóm phương pháp (sinh khuyết tật, lọc tần số, kiểm thử suy thoái quang học).
+\end{itemize}

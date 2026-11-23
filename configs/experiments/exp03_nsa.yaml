@@ -1,0 +1,29 @@
+experiment_id: "exp03_nsa"
+description: "YOLOv11-seg with NSA Poisson seamless cloning"
+
+dataset:
+  name: "mvtec"
+  root_dir: "./mvtec_ad"
+  target_categories: ["grid", "carpet", "tile", "screw", "pill", "bottle"]
+  split_ratio: 0.8
+  good_ratio: 0.15
+  seed: 42
+
+data_engine:
+  synthesizer:
+    type: "nsa"
+    width_ratio_range: [0.05, 0.22]
+    height_ratio_range: [0.05, 0.22]
+    anomaly_prob: 0.85
+  frequency_filter: null
+
+model:
+  weights: "yolo11l-seg.pt"
+  imgsz: 640
+  epochs: 100
+  batch: 16
+  device: "auto"
+
+evaluation:
+  dual_domain: true
+  robustness_benchmark: false

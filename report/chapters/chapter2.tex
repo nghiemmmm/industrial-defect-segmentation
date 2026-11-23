@@ -1,0 +1,404 @@
+\chapter{PHƯƠNG PHÁP VÀ QUY TRÌNH TRIỂN KHAI XỬ LÝ ẢNH}
+
+Chương này trình bày chi tiết kiến trúc giải pháp, cấu trúc dữ liệu nội bộ và nguyên lý hoạt động của từng mô-đun xử lý ảnh được xây dựng trong hệ thống. Nội dung chương tuân thủ chặt chẽ quy chuẩn trình bày khoa học: tuyệt đối không đưa mã nguồn thô vào báo cáo, mỗi thuật toán xử lý ảnh được chuẩn hóa theo cấu trúc 5 thành phần bắt buộc gồm: Đầu vào, Đầu ra, Luồng xử lý từng bước, Công thức toán học và Nhận xét vai trò trong toàn bộ hệ thống kiểm tra khuyết tật công nghiệp.
+
+\section{Kiến trúc tổng quát của quy trình xử lý ảnh}
+
+Quy trình xử lý ảnh được thiết kế theo kiến trúc module hóa hướng dữ liệu, bảo đảm tính khép kín và đáp ứng nguyên tắc Zero Data Leakage tuyệt đối. Sơ đồ khối tổng thể được tổ chức thành 4 phân hệ chính như sau:
+\begin{enumerate}
+    \item \textbf{Phân hệ nạp và quản lý mẫu (Data Loader \& Sampler):} Quản lý việc đọc ảnh lành từ tập \texttt{train/good}, trích xuất siêu dữ liệu kích thước, và duy trì tỉ lệ mẫu âm tính có kiểm soát (\texttt{good\_ratio = 0.15}) nhằm chống báo động giả.
+    \item \textbf{Phân hệ lọc và xử lý miền tần số (Frequency Preprocessing - Group B):} Áp dụng biến đổi Fourier nhanh 2 chiều (2D-FFT) triệt tiêu các đỉnh phổ tuần hoàn do kết cấu đan dệt lặp lại gây ra, hoặc áp dụng biến đổi sóng con 2 chiều (2D-DWT) để phân tách dải tần và khuếch đại dải chi tiết cao $LH, HL, HH$.
+    \item \textbf{Phân hệ sinh khuyết tật tổng hợp (Synthetic Generation - Group A):} Tự động tạo ra các khuyết tật nhân tạo đa dạng trực tiếp từ ảnh lành bằng 3 cơ chế: CutPaste (vết xước, mảng bám hình học), DRAEM (ố mốc ngẫu nhiên bằng Perlin noise) và NSA (ghép khuyết tật tự nhiên bằng phương trình Poisson).
+    \item \textbf{Phân hệ trích xuất đa giác và định dạng YOLO (Annotation Exporter):} Chuyển hóa mặt nạ nhị phân điểm ảnh thành danh sách tọa độ đa giác chuẩn hóa trong đoạn $[0.0, 1.0]$ để sẵn sàng cung cấp cho mô hình phân vùng thực thể.
+\end{enumerate}
+
+Toàn bộ luồng xử lý không gian và tần số được đồng bộ hóa nghiêm ngặt để đảm bảo ảnh sau xử lý và mặt nạ nhị phân luôn giữ nguyên sự tương ứng vị trí điểm ảnh $1:1$.
+
+\section{Biểu diễn và tổ chức dữ liệu ảnh}
+
+Để đảm bảo tính nhất quán và kiểm soát chặt chẽ dữ liệu qua từng bước xử lý, hệ thống định nghĩa lớp cấu trúc dữ liệu trung tâm \texttt{Sample}. Mỗi thể hiện của lớp \texttt{Sample} đóng gói đầy đủ các thông tin của một mẫu kiểm tra:
+\begin{itemize}
+    \item \texttt{image}: Ma trận ảnh số kích thước $H \times W \times C$, định dạng \texttt{uint8}, không gian màu RGB chuẩn.
+    \item \texttt{mask}: Ma trận nhị phân mặt đất kích thước $H \times W$, định dạng \texttt{uint8}, trong đó giá trị 0 biểu thị vùng nền lành và giá trị 255 biểu thị vùng khuyết tật. Đối với ảnh lành không có lỗi, ma trận này được khởi tạo tự động là mảng số 0 đồng nhất.
+    \item \texttt{label}: Chuỗi ký tự định danh nhãn khuyết tật (ví dụ: \texttt{"good"}, \texttt{"cut"}, \texttt{"scratch"}, \texttt{"broken\_large"}).
+    \item \texttt{category}: Tên lớp đối tượng công nghiệp tương ứng (ví dụ: \texttt{"bottle"}, \texttt{"grid"}, \texttt{"tile"}).
+    \item \texttt{is\_anomaly}: Biến cờ logic (\texttt{bool}) xác định trạng thái bất thường của mẫu dữ liệu.
+    \item \texttt{metadata}: Từ điển (\texttt{dict}) lưu trữ lịch sử các tham số thuật toán đã áp dụng (hệ số dải sóng con, mức độ nhiễu suy thoái, góc xoay affine).
+\end{itemize}
+
+Bảng 3 mô tả cấu trúc trường thuộc tính và cơ chế kiểm tra tính toàn vẹn hình học của lớp \texttt{Sample}.
+
+\begin{table}[h]
+\centering
+\caption{Cấu trúc các thuộc tính và kiểu dữ liệu của lớp thực thể \texttt{Sample}}
+\label{tab:sample_structure}
+\begin{tabularx}{\textwidth}{l l p{3.2cm} X}
+\toprule
+\textbf{Tên thuộc tính} & \textbf{Kiểu dữ liệu} & \textbf{Miền giá trị} & \textbf{Ý nghĩa và cơ chế kiểm soát} \\
+\midrule
+\texttt{image} & \texttt{np.ndarray} & $[0, 255]$, \texttt{uint8} & Ma trận ảnh màu 3 chiều $(H, W, 3)$. \\
+\texttt{mask} & \texttt{np.ndarray} & $\{0, 255\}$, \texttt{uint8} & Ma trận nhị phân 2 chiều $(H, W)$. Bắt buộc $\operatorname{shape}(I)[:2] == \operatorname{shape}(M)$. \\
+\texttt{label} & \texttt{str} & Chuỗi ký tự & Tên dạng lỗi hoặc nhãn \texttt{"good"}. \\
+\texttt{category} & \texttt{str} & Tên danh mục & Thuộc 6 danh mục MVTec AD kiểm chứng. \\
+\texttt{is\_anomaly} & \texttt{bool} & \texttt{True} / \texttt{False} & Cờ logic đồng bộ: $\texttt{True} \iff \max(M) > 0$. \\
+\texttt{metadata} & \texttt{dict} & Key-Value & Lưu trữ tham số thuật toán và lịch sử biến đổi. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\section{Chi tiết các mô-đun và thuật toán xử lý ảnh}
+
+Phần này trình bày chi tiết 8 mô-đun xử lý ảnh cốt lõi được xây dựng trong hệ thống theo đúng cấu trúc 5 phần bắt buộc.
+
+\subsection{Mô-đun sinh khuyết tật tổng hợp CutPaste}
+
+\subsubsection*{1. Đầu vào (Inputs)}
+\begin{itemize}
+    \item Ảnh màu RGB sản phẩm lành $I \in \mathbb{R}^{H \times W \times 3}$, kiểu dữ liệu \texttt{uint8}.
+    \item Chế độ sinh khuyết tật: \texttt{mode} $\in \{\texttt{"normal"}, \texttt{"scar"}\}$.
+    \item Tỷ lệ diện tích miếng vá: $\text{area\_ratio} \in [0.02, 0.15]$.
+    \item Tỷ lệ khung hình miếng vá: $\text{aspect\_ratio} \in [0.3, 3.3]$ (chế độ \texttt{normal}) hoặc $[0.05, 0.2]$ (chế độ \texttt{scar}).
+    \item Góc xoay miếng vá ngẫu nhiên: $\theta \in [-45^\circ, 45^\circ]$.
+\end{itemize}
+
+\subsubsection*{2. Đầu ra (Outputs)}
+\begin{itemize}
+    \item Ảnh tổng hợp mang khuyết tật $I_{cp} \in \mathbb{R}^{H \times W \times 3}$, kiểu dữ liệu \texttt{uint8}.
+    \item Mặt nạ nhị phân khuyết tật tương ứng $M_{cp} \in \{0, 255\}^{H \times W}$, kiểu \texttt{uint8}.
+\end{itemize}
+
+\subsubsection*{3. Luồng xử lý (Processing Flow)}
+\begin{itemize}
+    \item \textbf{Bước 1 -- Khởi tạo vùng cắt:} Xác định diện tích và kích thước hộp bao $(w_p, h_p)$ của miếng vá ngẫu nhiên từ tham số diện tích và tỷ lệ khung hình. Lấy mẫu tọa độ góc trên bên trái $(x_s, y_s)$ trên ảnh gốc và cắt ra mảnh ảnh $P = I[y_s:y_s+h_p, x_s:x_s+w_p]$.
+    \item \textbf{Bước 2 -- Biến đổi màu sắc (Color Jitter):} Thay đổi ngẫu nhiên độ sáng, độ tương phản và sắc độ của mảnh ảnh $P$ với biên độ dao động $\pm 10\%$ để tạo sự sai lệch quang học nhẹ so với nền.
+    \item \textbf{Bước 3 -- Áp dụng biến đổi Affine:} Xoay mảnh ảnh $P$ một góc $\theta$ ngẫu nhiên quanh tâm miếng vá bằng ma trận biến đổi Affine 2D. Đồng thời sinh một mặt nạ cục bộ $M_p$ cùng kích thước với giá trị 255 trong vùng đa giác xoay.
+    \item \textbf{Bước 4 -- Cấy ghép vào vị trí đích:} Lấy mẫu ngẫu nhiên tọa độ đích $(x_d, y_d)$ trên ảnh nền sao cho miếng vá nằm hoàn toàn trong khung hình. Dán đè các điểm ảnh của mảnh vá xoay vào ảnh nền tại vị trí đích.
+    \item \textbf{Bước 5 -- Cập nhật mặt nạ toàn cục:} Gán giá trị 255 vào ma trận mặt nạ $M_{cp}$ tại đúng các tọa độ điểm ảnh vừa được dán đè.
+\end{itemize}
+
+\subsubsection*{4. Công thức toán học}
+Tọa độ điểm ảnh $(x', y')$ sau biến đổi xoay và tịnh tiến được tính thông qua phép nhân ma trận Affine thuần nhất 2D:
+\begin{equation}
+    \begin{bmatrix} x' \\ y' \\ 1 \end{bmatrix} = 
+    \begin{bmatrix} 
+        \cos\theta & -\sin\theta & t_x \\ 
+        \sin\theta & \cos\theta & t_y \\ 
+        0 & 0 & 1 
+    \end{bmatrix} 
+    \begin{bmatrix} x - x_c \\ y - y_c \\ 1 \end{bmatrix} + 
+    \begin{bmatrix} x_c \\ y_c \\ 0 \end{bmatrix}
+\end{equation}
+Trong đó:
+\begin{itemize}
+    \item $(x, y)$ là tọa độ điểm ảnh gốc trong mảnh vá cục bộ.
+    \item $(x_c, y_c)$ là tọa độ tâm của mảnh vá.
+    \item $\theta$ là góc xoay ngẫu nhiên ($\theta \in [-45^\circ, 45^\circ]$).
+    \item $(t_x, t_y)$ là độ dời tịnh tiến đưa mảnh vá tới vị trí đích $(x_d, y_d)$.
+\end{itemize}
+
+\subsubsection*{5. Nhận xét về vai trò của mô-đun}
+Mô-đun CutPaste đóng vai trò mô phỏng hiệu quả các khuyết tật vật lý có ranh giới rõ ràng như vết xước dài cơ học (chế độ \texttt{scar}) hoặc mảng bám, dị vật hình học (chế độ \texttt{normal}). Tốc độ tính toán của thuật toán rất cao do chỉ thao tác trên ma trận điểm ảnh cục bộ, tạo ra nguồn mẫu huấn luyện đa dạng cho các lớp vật thể như chai lọ (`bottle`) và ốc vít (`screw`).
+
+\subsection{Mô-đun sinh khuyết tật bề mặt đa tỉ lệ DRAEM (Perlin Noise \& Beta Blending)}
+
+\subsubsection*{1. Đầu vào (Inputs)}
+\begin{itemize}
+    \item Ảnh màu RGB sản phẩm lành $I \in \mathbb{R}^{H \times W \times 3}$.
+    \item Ảnh nguồn kết cấu phụ $T \in \mathbb{R}^{H \times W \times 3}$ (lấy từ ảnh sản phẩm lành khác hoặc tự thân ảnh $I$).
+    \item Số quãng tám tần số (Octaves): $K \in \{1, 2, 3\}$.
+    \item Ngưỡng nhị phân hóa mặt nạ Perlin: $\tau_{perlin} \in [0.3, 0.6]$.
+    \item Hệ số hòa trộn không trong suốt: $\beta \in [0.2, 0.8]$.
+\end{itemize}
+
+\subsubsection*{2. Đầu ra (Outputs)}
+\begin{itemize}
+    \item Ảnh tổng hợp mang khuyết tật loang màu $I_{dr} \in \mathbb{R}^{H \times W \times 3}$.
+    \item Mặt nạ nhị phân khuyết tật hình dạng hữu cơ uốn lượn $M_{dr} \in \{0, 255\}^{H \times W}$.
+\end{itemize}
+
+\subsubsection*{3. Luồng xử lý (Processing Flow)}
+\begin{itemize}
+    \item \textbf{Bước 1 -- Khởi tạo lưới Perlin chuẩn $512 \times 512$:} Để khắc phục hoàn toàn lỗi chia hết bước nhảy lưới trên các ảnh có kích thước tùy ý (như $900 \times 900$ của `bottle`), hệ thống luôn khởi tạo lưới gradient ngẫu nhiên trên kích thước chuẩn lũy thừa của 2 là $512 \times 512$.
+    \item \textbf{Bước 2 -- Tạo trường vô hướng Perlin liên tục:} Tại mỗi nút lưới, sinh ngẫu nhiên vector gradient đơn vị 2D. Với mỗi điểm bên trong ô lưới, tính tích vô hướng với 4 vector gradient ở 4 góc và nội suy làm mượt bằng đa thức bậc 5 (Fade function: $s(t) = 6t^5 - 15t^4 + 10t^3$). Tổng hợp đa quãng tám để tạo trường vô hướng $P(x, y) \in [-1, 1]$.
+    \item \textbf{Bước 3 -- Co giãn thích nghi về kích thước ảnh gốc:} Áp dụng phép nội suy song tuyến tính \texttt{cv2.resize(..., interpolation=cv2.INTER\_LINEAR)} để co giãn trường vô hướng từ $512 \times 512$ về đúng kích thước thực tế $(W, H)$ của ảnh.
+    \item \textbf{Bước 4 -- Ngưỡng hóa tạo mặt nạ $M_{dr}$:} Áp dụng phân ngưỡng $\mathbb{I}\{P(x, y) > \tau_{perlin}\}$ để tạo mặt nạ nhị phân $M_{dr}$ với các hình thái vùng khuyết tật uốn lượn tự nhiên.
+    \item \textbf{Bước 5 -- Hòa trộn phi tuyến tính (Beta Blending):} Thực hiện hòa trộn điểm ảnh giữa ảnh gốc $I$ và ảnh kết cấu $T$ theo trọng số mờ $\beta$ tại các vị trí mặt nạ $M_{dr}$ kích hoạt.
+\end{itemize}
+
+\subsubsection*{4. Công thức toán học}
+Trường vô hướng Perlin 2 chiều tại điểm $(x, y)$ trong ô lưới $[x_0, x_1] \times [y_0, y_1]$ được xác định bởi:
+\begin{equation}
+    P(x, y) = \text{lerp}\Big(\text{lerp}(n_0, n_1, s(x - x_0)), \text{lerp}(n_2, n_3, s(x - x_0)), s(y - y_0)\Big)
+\end{equation}
+Trong đó $n_i = \mathbf{g}_i \cdot (\mathbf{r} - \mathbf{r}_i)$ là tích vô hướng giữa vector khoảng cách và vector gradient tại góc $i$, và hàm nội suy làm mượt (Fade function) là:
+\begin{equation}
+    s(t) = 6t^5 - 15t^4 + 10t^3
+\end{equation}
+Công thức hòa trộn ảnh tổng hợp cuối cùng:
+\begin{equation}
+    I_{dr}(x, y) = \Big(1 - \beta \cdot \frac{M_{dr}(x, y)}{255}\Big) \cdot I(x, y) + \Big(\beta \cdot \frac{M_{dr}(x, y)}{255}\Big) \cdot T(x, y)
+\end{equation}
+Trong đó:
+\begin{itemize}
+    \item $I(x, y)$ là giá trị điểm ảnh gốc.
+    \item $T(x, y)$ là giá trị điểm ảnh nguồn kết cấu lai tạo.
+    \item $M_{dr}(x, y) \in \{0, 255\}$ là mặt nạ nhị phân khuyết tật.
+    \item $\beta \in [0.2, 0.8]$ là hệ số độ đậm nhạt của vết khuyết tật.
+\end{itemize}
+
+\subsubsection*{5. Nhận xét về vai trò của mô-đun}
+DRAEM Synthesizer mô phỏng hoàn hảo các dạng khuyết tật bề mặt tự nhiên phi hình học như vết ố mốc, vết ăn mòn hóa học, biến màu nhiệt độ hoặc vết bẩn loang lổ trên các sản phẩm thảm dệt (`carpet`) và gạch men (`tile`). Việc chuẩn hóa lưới $512 \times 512$ giúp thuật toán hoạt động ổn định $100\%$ trên mọi độ phân giải ảnh công nghiệp mà không xảy ra ngoại lệ tràn mảng.
+
+\subsection{Mô-đun ghép khuyết tật tự nhiên NSA (Poisson Seamless Cloning)}
+
+\subsubsection*{1. Đầu vào (Inputs)}
+\begin{itemize}
+    \item Ảnh đích sản phẩm lành $I_d \in \mathbb{R}^{H \times W \times 3}$.
+    \item Ảnh nguồn chứa họa tiết khuyết tật $I_s \in \mathbb{R}^{H \times W \times 3}$.
+    \item Tâm vị trí ghép khuyết tật $(c_x, c_y)$.
+    \item Tham số phân đoạn tiền cảnh tự động bằng ngưỡng Otsu.
+\end{itemize}
+
+\subsubsection*{2. Đầu ra (Outputs)}
+\begin{itemize}
+    \item Ảnh ghép khuyết tật liền mạch $I_{nsa} \in \mathbb{R}^{H \times W \times 3}$ không có hiện tượng gián đoạn quang học ở ranh giới.
+    \item Mặt nạ nhị phân khuyết tật thực tế $M_{nsa} \in \{0, 255\}^{H \times W}$.
+\end{itemize}
+
+\subsubsection*{3. Luồng xử lý (Processing Flow)}
+\begin{itemize}
+    \item \textbf{Bước 1 -- Phân đoạn tiền cảnh tự động (Foreground Masking):} Đối với các lớp vật thể có vùng nền đen/trống (như `screw`, `bottle`, `pill`), áp dụng phân ngưỡng Otsu trên kênh độ xám để xác định mặt nạ tiền cảnh $M_{fg}$. Khâu này đảm bảo khuyết tật chỉ được cấy ghép lên thân vật thể, không bị rơi ra ngoài không gian trống.
+    \item \textbf{Bước 2 -- Trích xuất vùng chọn khuyết tật nguồn:} Cắt một mảng ảnh bất thường $I_s$ kèm mặt nạ hình học $M_s$ (kích thước hình chữ nhật hoặc elip ngẫu nhiên).
+    \item \textbf{Bước 3 -- Tính toán trường gradient vi phân:} Xác định trường vector đạo hàm không gian $\mathbf{v} = \nabla I_s$ bên trong vùng chọn $\Omega$.
+    \item \textbf{Bước 4 -- Ghép liền mạch bằng phương trình Poisson:} Sử dụng hàm \texttt{cv2.seamlessClone} với chế độ \texttt{NORMAL\_CLONE}. Thuật toán giải hệ phương trình rời rạc Poisson trên lưới điểm ảnh để tìm ma trận cường độ sáng mới $I_{nsa}$ khớp điều kiện biên với ảnh đích $I_d$.
+    \item \textbf{Bước 5 -- Cập nhật mặt nạ phân vùng:} Giao mặt nạ vùng chọn với mặt nạ tiền cảnh vật thể $M_{nsa} = M_s \cap M_{fg}$ để tạo mặt nạ nhị phân chân thực.
+\end{itemize}
+
+\subsubsection*{4. Công thức toán học}
+Cường độ sáng tại mỗi điểm ảnh $(x, y) \in \Omega$ của ảnh kết quả được xác định bằng nghiệm của phương trình sai phân hữu hạn Poisson:
+\begin{equation}
+    4 f(x, y) - f(x+1, y) - f(x-1, y) - f(x, y+1) - f(x, y-1) = \operatorname{div}\mathbf{v}(x, y)
+\end{equation}
+Với điều kiện biên Dirichlet tại các điểm lân cận thuộc biên $\partial\Omega$:
+\begin{equation}
+    f(x, y) = I_d(x, y) \quad \forall (x, y) \in \partial\Omega
+\end{equation}
+Trong đó:
+\begin{itemize}
+    \item $f(x, y)$ là giá trị điểm ảnh cần giải của ảnh kết quả $I_{nsa}$.
+    \item $I_d(x, y)$ là cường độ sáng của ảnh đích tại đường biên.
+    \item $\operatorname{div}\mathbf{v}(x, y)$ là độ phân kỳ của trường gradient nguồn được xấp xỉ bằng sai phân bậc hai:
+    $$\operatorname{div}\mathbf{v}(x, y) = 4 I_s(x, y) - I_s(x+1, y) - I_s(x-1, y) - I_s(x, y+1) - I_s(x, y-1)$$
+\end{itemize}
+
+\subsubsection*{5. Nhận xét về vai trò của mô-đun}
+Mô-đun NSA (Natural Synthetic Anomalies) là giải pháp cao cấp nhất trong nhóm Group A. Nhờ giải phương trình vi phân Poisson trên trường gradient, khuyết tật cấy ghép tự động hấp thụ màu sắc và cường độ ánh sáng của vùng nền xung quanh, loại bỏ hoàn toàn các ranh giới cắt nhân tạo sắc nhọn.
+
+\subsection{Mô-đun lọc miền tần số 2D-FFT và triệt tiêu thành phần tuần hoàn}
+
+\subsubsection*{1. Đầu vào (Inputs)}
+\begin{itemize}
+    \item Ảnh màu RGB $I \in \mathbb{R}^{H \times W \times 3}$.
+    \item Hệ số ngưỡng phát hiện đỉnh phổ: $\tau_{peak} = 3.5$.
+    \item Bán kính bộ lọc chặn dải Notch Gaussian: $r_0 = 5.0$ pixel.
+\end{itemize}
+
+\subsubsection*{2. Đầu ra (Outputs)}
+\begin{itemize}
+    \item Ảnh sau khi triệt tiêu thành phần hoa văn tuần hoàn $I_{fft} \in \mathbb{R}^{H \times W \times 3}$.
+    \item Ma trận phổ biên độ tần số $|F(u, v)|$ phục vụ trực quan hóa.
+\end{itemize}
+
+\subsubsection*{3. Luồng xử lý (Processing Flow)}
+\begin{itemize}
+    \item \textbf{Bước 1 -- Biến đổi Fourier 2D từng kênh màu:} Chuyển đổi từng kênh màu $c \in \{R, G, B\}$ từ miền không gian sang miền tần số bằng thuật toán biến đổi Fourier nhanh \texttt{np.fft.fft2}.
+    \item \textbf{Bước 2 -- Dịch chuyển gốc tần số:} Áp dụng hàm \texttt{np.fft.fftshift} để đưa thành phần tần số 0 (thành phần DC) về chính giữa tâm ma trận $(u_0, v_0) = (H/2, W/2)$.
+    \item \textbf{Bước 3 -- Phát hiện đỉnh phổ năng lượng tuần hoàn:} Tính phổ biên độ $|F(u, v)|$. Xác định ngưỡng động $T = \tau_{peak} \cdot \operatorname{median}(|F|) + \mu(|F|)$. Tìm các tọa độ đỉnh $(u_k, v_k)$ có năng lượng vượt ngưỡng $T$ và nằm ngoài vùng lân cận thành phần DC (bán kính $> 10$ pixel).
+    \item \textbf{Bước 4 -- Nhân hàm truyền Notch Gaussian đối xứng:} Khởi tạo mặt nạ lọc $H_{notch}(u, v) = 1.0$. Tại mỗi cặp đỉnh đối xứng $(u_k, v_k)$ và $(-u_k, -v_k)$, nhân vào hàm suy giảm Gauss để triệt tiêu năng lượng tại tần số tuần hoàn đó.
+    \item \textbf{Bước 5 -- Biến đổi Fourier nghịch đảo (2D-IFFT):} Dịch ngược gốc tần số bằng \texttt{np.fft.ifftshift}, thực hiện biến đổi nghịch đảo \texttt{np.fft.ifft2}, lấy phần thực, cắt ngưỡng về đoạn $[0, 255]$ và ép kiểu \texttt{uint8}.
+\end{itemize}
+
+\subsubsection*{4. Công thức toán học}
+Hàm truyền của bộ lọc chặn dải Notch Gaussian đa điểm được xác định bởi:
+\begin{equation}
+    H_{notch}(u, v) = \prod_{k=1}^K \left[ 1 - \exp\left( -\frac{D_k(u, v)^2}{2 r_0^2} \right) \right] \cdot \left[ 1 - \exp\left( -\frac{D_{-k}(u, v)^2}{2 r_0^2} \right) \right]
+\end{equation}
+Trong đó:
+\begin{itemize}
+    \item $K$ là số lượng cặp đỉnh tần số tuần hoàn phát hiện được.
+    \item $D_k(u, v) = \sqrt{(u - u_k)^2 + (v - v_k)^2}$ là khoảng cách từ điểm tần số $(u, v)$ tới đỉnh phổ thứ $k$.
+    \item $D_{-k}(u, v) = \sqrt{(u + u_k - H)^2 + (v + v_k - W)^2}$ là khoảng cách tới đỉnh đối xứng liên hợp.
+    \item $r_0$ là bán kính ảnh hưởng của hố chặn tần số.
+\end{itemize}
+
+\subsubsection*{5. Nhận xét về vai trò của mô-đun}
+Mô-đun 2D-FFT Notch Filter đóng vai trò "lột bỏ" các hoa văn đan dệt lặp lại của lưới kim loại (`grid`) và sợi thảm (`carpet`). Nhờ triệt tiêu các tần số cơ sở của nền, năng lượng của khuyết tật bất thường (vết rách, mối hàn lỗi) trở nên nổi bật rõ rệt trong miền không gian, giúp mô hình phân vùng dễ dàng nhận diện biên dạng lỗi.
+
+\subsection{Mô-đun phân tích biến đổi Wavelet rời rạc 2D-DWT và tăng cường biên cạnh}
+
+\subsubsection*{1. Đầu vào (Inputs)}
+\begin{itemize}
+    \item Ảnh màu RGB $I \in \mathbb{R}^{H \times W \times 3}$.
+    \item Họ sóng con biến đổi: Mặc định sóng con Haar (\texttt{"haar"} / Daubechies \texttt{"db1"}).
+    \item Hệ số khuếch đại dải chi tiết cao: $k_{detail} = 1.5$.
+\end{itemize}
+
+\subsubsection*{2. Đầu ra (Outputs)}
+\begin{itemize}
+    \item Ảnh tái tạo đã tăng cường sắc nét chi tiết biên $I_{dwt} \in \mathbb{R}^{H \times W \times 3}$.
+    \item Các ma trận phổ con 4 dải $(LL, LH, HL, HH)$ phục vụ phân tích.
+\end{itemize}
+
+\subsubsection*{3. Luồng xử lý (Processing Flow)}
+\begin{itemize}
+    \item \textbf{Bước 1 -- Phân rã sóng con 2D:} Áp dụng biến đổi sóng con rời rạc mức 1 độc lập trên từng kênh màu bằng hàm \texttt{pywt.dwt2} (kèm cơ chế dự phòng thuần NumPy Haar nếu không có thư viện bên ngoài). Kết quả phân tách thành 4 ma trận con: $LL, LH, HL, HH$.
+    \item \textbf{Bước 2 -- Bảo toàn dải tần số thấp:} Giữ nguyên vẹn ma trận xấp xỉ $LL$ để bảo toàn độ sáng nền và màu sắc tổng thể của vật thể.
+    \item \textbf{Bước 3 -- Tăng cường hệ số dải chi tiết cao:} Nhân các hệ số chi tiết ngang ($LH$), chi tiết dọc ($HL$) và chi tiết chéo ($HH$) với hệ số khuếch đại:
+    $$LH' = k_{detail} \cdot LH, \quad HL' = k_{detail} \cdot HL, \quad HH' = k_{detail} \cdot HH$$
+    \item \textbf{Bước 4 -- Biến đổi sóng con ngược (2D-IDWT):} Tái tạo ma trận không gian từ bộ 4 ma trận $(LL, LH', HL', HH')$ bằng phép biến đổi \texttt{pywt.idwt2}.
+    \item \textbf{Bước 5 -- Khôi phục ảnh màu:} Ghép 3 kênh màu, cắt ngưỡng biên $[0, 255]$ và chuyển đổi kiểu dữ liệu về \texttt{uint8}.
+\end{itemize}
+
+\subsubsection*{4. Công thức toán học}
+Quan hệ tái tạo biến đổi sóng con ngược 2 chiều:
+\begin{equation}
+    I_{dwt}(x, y) = \operatorname{IDWT2}\Big(LL, k_{detail} \cdot LH, k_{detail} \cdot HL, k_{detail} \cdot HH\Big)
+\end{equation}
+Trong đó:
+\begin{itemize}
+    \item $LL$ là ma trận hệ số xấp xỉ tần số thấp.
+    \item $LH, HL, HH$ lần lượt là các ma trận hệ số chi tiết cao phương ngang, phương dọc và phương chéo.
+    \item $k_{detail} \ge 1.0$ là hệ số khuếch đại chi tiết biên cạnh.
+\end{itemize}
+
+\subsubsection*{5. Nhận xét về vai trò của mô-đun}
+Biến đổi 2D-DWT giúp khuếch đại có chọn lọc các thành phần tần số cao mang thông tin vết nứt tế vi trên bề mặt gạch men (`tile`) hoặc vết trầy ren ốc vít (`screw`) mà không làm tăng nhiễu đồng đều toàn ảnh như các bộ lọc làm sắc nét không gian thông thường (Unsharp Masking).
+
+\subsection{Mô-đun mô phỏng suy thoái quang học MVTec-AD-C}
+
+\subsubsection*{1. Đầu vào (Inputs)}
+\begin{itemize}
+    \item Ảnh kiểm thử sạch $I_{clean} \in \mathbb{R}^{H \times W \times 3}$.
+    \item Loại suy thoái quang học: $\text{corruption} \in \{\texttt{gaussian\_noise}, \texttt{gaussian\_blur}, \texttt{motion\_blur}, \texttt{defocus\_blur}\}$.
+    \item Mức độ nghiêm trọng (Severity level): $s \in \{1, 2, 3, 4, 5\}$.
+\end{itemize}
+
+\subsubsection*{2. Đầu ra (Outputs)}
+\begin{itemize}
+    \item Ảnh bị biến dạng quang học $I_{corrupt} \in \mathbb{R}^{H \times W \times 3}$ mô phỏng đúng điều kiện khắc nghiệt của camera nhà xưởng.
+\end{itemize}
+
+\subsubsection*{3. Luồng xử lý (Processing Flow)}
+\begin{itemize}
+    \item \textbf{Gaussian Noise:} Sinh ma trận nhiễu phân phối chuẩn độc lập $\mathcal{N}(0, \sigma_s^2)$ với độ lệch chuẩn $\sigma_s \in [0.08, 0.28]$. Cộng trực tiếp vào ảnh chuẩn hóa và cắt ngưỡng.
+    \item \textbf{Gaussian Blur:} Tích chập không gian với nhân Gauss kích thước $k_s \times k_s$ ($k_s \in \{3, 5, 7, 9, 11\}$) và độ lệch chuẩn $\sigma_s \in [1.0, 3.0]$.
+    \item \textbf{Motion Blur:} Xây dựng nhân lọc vệt chuyển động thẳng góc $\theta$ ngẫu nhiên với độ dài vệt quét $L_s \in \{5, 9, 13, 17, 21\}$ pixel, tích chập bằng hàm \texttt{cv2.filter2D}.
+    \item \textbf{Defocus Blur:} Tạo nhân đĩa tròn Airy (Disk kernel) bán kính $R_s \in \{2, 3, 4, 6, 8\}$ pixel mô phỏng hiện tượng thấu kính lệch tiêu cự.
+\end{itemize}
+
+\subsubsection*{4. Công thức toán học}
+Mô hình toán học của quá trình suy thoái quang học tổng quát:
+\begin{equation}
+    I_{corrupt}(x, y) = \operatorname{clip}_{[0, 255]}\Big( (I_{clean} * h_s)(x, y) + \eta_s(x, y) \Big)
+\end{equation}
+Trong đó:
+\begin{itemize}
+    \item $*$ là toán tử tích chập không gian 2 chiều.
+    \item $h_s(x, y)$ là hàm đáp ứng xung điểm (Point Spread Function -- PSF) tương ứng với từng loại mờ ở mức nghiêm trọng $s$.
+    \item $\eta_s(x, y) \sim \mathcal{N}(0, \sigma_s^2)$ là thành phần nhiễu cộng Gauss ngẫu nhiên.
+\end{itemize}
+
+\subsubsection*{5. Nhận xét về vai trò của mô-đun}
+Mô-đun này cung cấp công cụ kiểm thử độ bền vững quang học độc lập, giúp đánh giá định lượng khả năng chống chịu nhiễu của các mô hình phân vùng trước khi đưa vào ứng dụng thực tế.
+
+\subsection{Mô-đun trích xuất đường viền và chuẩn hóa đa giác YOLOv11-seg}
+
+\subsubsection*{1. Đầu vào (Inputs)}
+\begin{itemize}
+    \item Mặt nạ nhị phân khuyết tật $M \in \{0, 255\}^{H \times W}$.
+    \item Kích thước ảnh $(W, H)$.
+    \item Tham số xấp xỉ đa giác $\epsilon_{ratio} = 0.002$ và diện tích lọc rác tối thiểu $S_{min} = 10.0$ pixel.
+\end{itemize}
+
+\subsubsection*{2. Đầu ra (Outputs)}
+\begin{itemize}
+    \item Danh sách các chuỗi nhãn định dạng YOLOv11-seg: \texttt{<class\_id> x1 y1 x2 y2 ... xn yn} với tọa độ các đỉnh đa giác được chuẩn hóa hoàn toàn trong đoạn $[0.0, 1.0]$.
+\end{itemize}
+
+\subsubsection*{3. Luồng xử lý (Processing Flow)}
+\begin{itemize}
+    \item \textbf{Bước 1 -- Dò tìm đường bao ngoài:} Áp dụng thuật toán theo dõi đường bao phân cấp Suzuki-Abe thông qua hàm \texttt{cv2.findContours} với cờ \texttt{cv2.RETR\_EXTERNAL} và \texttt{cv2.CHAIN\_APPROX\_SIMPLE}.
+    \item \textbf{Bước 2 -- Lọc bỏ đa giác nhiễu diện tích nhỏ:} Tính diện tích đường bao bằng \texttt{cv2.contourArea}. Loại bỏ toàn bộ các đa giác có diện tích $< S_{min}$ để tránh sinh nhãn rác.
+    \item \textbf{Bước 3 -- Rút gọn đỉnh đa giác (Douglas-Peucker):} Tính chu vi đường bao $L = \operatorname{perimeter}(C)$. Áp dụng hàm \texttt{cv2.approxPolyDP} với khoảng cách sai số tối đa $\epsilon = \epsilon_{ratio} \cdot L$ nhằm tối ưu hóa số lượng đỉnh biểu diễn mà vẫn bảo toàn hình học khuyết tật.
+    \item \textbf{Bước 4 -- Chuẩn hóa tọa độ tỷ lệ $[0.0, 1.0]$:} Chia tọa độ đỉnh $(x_i, y_i)$ lần lượt cho chiều rộng $W$ và chiều cao $H$ của ảnh. Cắt ngưỡng ép giá trị chặt chẽ trong đoạn $[0.0, 1.0]$.
+    \item \textbf{Bước 5 -- Kiểm tra tính hợp lệ:} Bắt buộc đa giác phải có tối thiểu 3 đỉnh hợp lệ ($N_{points} \ge 3$). Xuất ra dòng văn bản nhãn theo chuẩn YOLO.
+\end{itemize}
+
+\subsubsection*{4. Công thức toán học}
+Công thức chuẩn hóa tọa độ đỉnh đa giác:
+\begin{equation}
+    x_{norm} = \operatorname{clip}\left(\frac{x}{W}, 0.0, 1.0\right), \quad y_{norm} = \operatorname{clip}\left(\frac{y}{H}, 0.0, 1.0\right)
+\end{equation}
+Tiêu chí dừng của thuật toán rút gọn đỉnh Ramer-Douglas-Peucker:
+\begin{equation}
+    \max_{P \in \text{đường cong}} \operatorname{dist}(P, AB) \le \epsilon = 0.002 \cdot \oint_C ds
+\end{equation}
+
+\subsubsection*{5. Nhận xét về vai trò của mô-đun}
+Mô-đun là cầu nối then chốt chuyển hóa các mặt nạ nhị phân điểm ảnh ma trận sang định dạng vector đa giác chuẩn mực của mô hình học sâu YOLOv11-seg, giảm thiểu dung lượng lưu trữ nhãn và tăng tốc độ nạp dữ liệu trong quá trình huấn luyện.
+
+\subsection{Mô-đun đánh giá phân vùng đa miền (Dual-Domain Evaluation)}
+
+\subsubsection*{1. Đầu vào (Inputs)}
+\begin{itemize}
+    \item Danh sách các đa giác phân vùng dự đoán kèm độ tin cậy $\{(\mathcal{P}_i, c_i)\}$.
+    \item Mặt nạ ground-truth nhị phân thực tế $M_{gt} \in \{0, 255\}^{H \times W}$.
+    \item Ngưỡng phân lớp báo động giả $\tau_{far} = 0.25$.
+\end{itemize}
+
+\subsubsection*{2. Đầu ra (Outputs)}
+\begin{itemize}
+    \item Các chỉ số đo lường miền thực thể: Mask mAP@50, Mask mAP@50-95.
+    \item Các chỉ số đo lường miền xác suất điểm ảnh liên tục: Pixel-AUROC, Image-AUROC, và FAR@0.25.
+\end{itemize}
+
+\subsubsection*{3. Luồng xử lý (Processing Flow)}
+\begin{itemize}
+    \item \textbf{Bước 1 -- Tính chỉ số phân vùng thực thể (Instance Metrics):} So khớp các đa giác dự báo với ground-truth dựa trên chỉ số IoU (Intersection over Union). Tổng hợp đường cong Precision-Recall và tính diện tích mAP tại ngưỡng IoU 0.50 và chuỗi ngưỡng từ 0.50 đến 0.95.
+    \item \textbf{Bước 2 -- Tái tạo bản đồ xác suất liên tục $P(y, x)$:} Khởi tạo bản đồ xác suất $P \in \mathbb{R}^{H \times W}$ toàn số 0. Với mỗi đa giác dự đoán $\mathcal{P}_i$ có độ tin cậy $c_i$, vẽ vùng đa giác và gán giá trị theo phép toán lấy cực đại: $P(y, x) = \max\Big(P(y, x), c_i \cdot \mathbb{I}\{(y, x) \in \mathcal{P}_i\}\Big)$.
+    \item \textbf{Bước 3 -- Tính toán Pixel-AUROC và Image-AUROC:} Trải phẳng ma trận xác suất $P$ và mặt nạ nhị phân $M_{gt}$ thành các vector 1 chiều. Sử dụng hàm \texttt{roc\_curve} và \texttt{auc} của thư viện \texttt{scikit-learn} để tính toán diện tích dưới đường cong ROC mức điểm ảnh và mức toàn ảnh.
+    \item \textbf{Bước 4 -- Đo lường tỷ lệ báo động giả FAR@0.25:} Trên tập các ảnh lành đã biết chắc chắn không có lỗi ($\mathcal{D}_{good}$), đếm số lượng ảnh bị mô hình dự đoán có ít nhất một điểm ảnh vượt ngưỡng $\tau_{far} = 0.25$.
+\end{itemize}
+
+\subsubsection*{4. Công thức toán học}
+Bản đồ xác suất bất thường liên tục tại mỗi tọa độ không gian:
+\begin{equation}
+    P(y, x) = \max_{i=1 \dots N} \left( c_i \cdot \mathbb{I}\{(y, x) \in \mathcal{P}_i\} \right)
+\end{equation}
+Tỷ lệ báo động giả tại ngưỡng $\tau$:
+\begin{equation}
+    \text{FAR}@\tau = \frac{1}{|\mathcal{D}_{good}|} \sum_{I \in \mathcal{D}_{good}} \mathbb{I}\left( \max_{(x, y)} P_I(x, y) \ge \tau \right)
+\end{equation}
+Trong đó $\mathbb{I}(\cdot)$ là hàm chỉ thị nhận giá trị 1 nếu mệnh đề đúng và 0 nếu mệnh đề sai.
+
+\subsubsection*{5. Nhận xét về vai trò của mô-đun}
+Hệ thống chỉ số kép giúp đánh giá toàn diện năng lực của thuật toán: vừa kiểm tra độ khớp biên dạng hình học qua mAP, vừa kiểm soát nghiêm ngặt hiện tượng dự báo diện tích khuyết tật quá đà (over-segmentation) hoặc báo động giả trên bề mặt sản phẩm lành qua AUROC và FAR.
+
+\section{Quy trình thực hiện và tích hợp các mô-đun}
+
+Các mô-đun xử lý ảnh nêu trên được tích hợp thành một đường ống xử lý tự động hóa khép kín thông qua tệp điều khiển trung tâm \texttt{experiments/run\_experiment.py}. 
+
+Quy trình tích hợp được vận hành theo các bước nối tiếp:
+\begin{enumerate}
+    \item Nạp cấu hình thực nghiệm từ tệp YAML trong thư mục \texttt{configs/experiments/}.
+    \item Khởi tạo bộ nạp dữ liệu \texttt{MVTecLoader}, đọc tập ảnh lành và thiết lập seed ngẫu nhiên cố định để đảm bảo tính tái lập.
+    \item Kích hoạt phân hệ lọc tần số tương ứng (nếu cấu hình yêu cầu bật FFT hoặc DWT).
+    \item Kích hoạt phân hệ sinh khuyết tật tổng hợp (CutPaste, DRAEM hoặc NSA) để tạo tập ảnh tăng cường kèm mặt nạ nhị phân.
+    \item Chuyển đổi và xuất nhãn đa giác YOLOv11-seg vào cấu trúc thư mục huấn luyện tạm thời.
+    \item Thực thi kịch bản đánh giá kép trên tập kiểm thử nguyên bản và tập kiểm thử suy thoái quang học MVTec-AD-C.
+    \item Thu thập và tổng hợp toàn bộ số liệu về ma trận kết quả \texttt{results/ablation\_summary.csv}.
+\end{enumerate}
+
+\section{Kết luận chương II}
+
+Chương II đã hoàn thành việc mô tả chi tiết kiến trúc giải pháp và 8 mô-đun xử lý ảnh cốt lõi trong hệ thống. Mỗi mô-đun đều được trình bày chuẩn xác theo cấu trúc 5 thành phần khoa học, làm rõ cơ sở toán học giải tích và vai trò chức năng tương ứng mà không sử dụng mã nguồn thô. Sự tích hợp chặt chẽ giữa các giải pháp lọc miền tần số và sinh mẫu tổng hợp tạo cơ sở vững chắc cho việc triển khai thực nghiệm đánh giá trong Chương III.

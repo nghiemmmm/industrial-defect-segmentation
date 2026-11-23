@@ -1,16 +1,75 @@
-# Python
+# ==============================================================================
+# Python & Bytecode
+# ==============================================================================
 __pycache__/
 *.py[cod]
-.ipynb_checkpoints/
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environments
 .venv/
 venv/
+ENV/
 env/
-*.egg-info/
+env.bak/
+venv.bak/
 
-# Datasets, weights and build artefacts (download / regenerate them, see README)
+# Jupyter Notebook Checkpoints
+.ipynb_checkpoints/
+
+# Unit Testing & Coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+*.cover
+.hypothesis/
+
+# ==============================================================================
+# Datasets & Large Raw Data (Zero Data Leakage / Do Not Push to Git)
+# ==============================================================================
 data/
 datasets/
-/runs/
+mvtec_ad/
+*.tar
+*.tar.gz
+*.tar.xz
+*.zip
+*.7z
+*.rar
+*.gz
+
+# Raw Media / Binary formats
+*.npy
+*.npz
+*.pkl
+*.parquet
+*.bin
+*.mp4
+*.avi
+*.mkv
+!results/media/*.mp4
+
+# ==============================================================================
+# Model Weights, Checkpoints & Serialization (Exceed GitHub 100MB Limit)
+# ==============================================================================
 weights/
 checkpoints/
 *.pt
@@ -21,22 +80,40 @@ checkpoints/
 *.trt
 *.plan
 *.safetensors
-*.bin
-*.npy
-*.npz
-*.pkl
-*.parquet
-*.zip
-*.tar.gz
-build/
 
-# Raw videos (small previews in results/media are tracked explicitly)
-*.mp4
-*.avi
-*.mkv
-!results/media/*.mp4
+# ==============================================================================
+# Training Runs & Transient Experiment Dumps
+# ==============================================================================
+runs/
+results/experiments/
+results/metrics/
+results/cpp_demo/*.jpg
 
-# OS / editor
+# ==============================================================================
+# LaTeX Auxiliary Build Artifacts
+# ==============================================================================
+*.aux
+*.lof
+*.log
+*.lot
+*.out
+*.toc
+*.bbl
+*.blg
+*.synctex.gz
+*.fdb_latexmk
+*.fls
+
+# ==============================================================================
+# Operating System & IDE Files
+# ==============================================================================
 .DS_Store
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+desktop.ini
+$RECYCLE.BIN/
 .vscode/
 .idea/
+*.swp
+*~

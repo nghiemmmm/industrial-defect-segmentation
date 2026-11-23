@@ -1,0 +1,190 @@
+\chapter{TỔNG QUAN VỀ BÀI TOÁN XỬ LÝ ẢNH}
+
+Chương này trình bày tổng quan về cơ sở lý thuyết toán học và bối cảnh kỹ thuật của bài toán phân vùng khuyết tật bề mặt sản phẩm công nghiệp. Nội dung chương tập trung phát biểu bài toán dưới góc nhìn giải tích ảnh số, hệ thống hóa các kiến thức nền tảng về miền tần số 2 chiều, biến đổi sóng con và phương trình vi phân Poisson, đồng thời khảo sát các hướng tiếp cận hiện nay cùng những thách thức đặc thù trong môi trường sản xuất thực tế.
+
+\section{Phát biểu bài toán}
+
+Trong bài toán kiểm tra chất lượng sản phẩm bằng thị giác máy tính, ảnh đầu vào là một ảnh số biểu diễn bề mặt sản phẩm, được ký hiệu toán học dưới dạng ma trận điểm ảnh 3 chiều:
+\begin{equation}
+    I \in \mathbb{R}^{H \times W \times C}
+\end{equation}
+Trong đó:
+\begin{itemize}
+    \item $H, W$ lần lượt là chiều cao (Height) và chiều rộng (Width) của ảnh tính theo đơn vị pixel.
+    \item $C$ là số kênh màu (với ảnh màu RGB thông thường, $C = 3$).
+    \item Mỗi điểm ảnh tại tọa độ $(x, y)$ có các giá trị cường độ sáng $I(x, y, c) \in [0, 255]$ ứng với từng kênh màu $c \in \{R, G, B\}$.
+\end{itemize}
+
+Mục tiêu của bài toán \textbf{phân vùng khuyết tật mức điểm ảnh (Pixel-level Defect Segmentation)} là xây dựng một hàm ánh xạ $f: \mathbb{R}^{H \times W \times C} \to \{0, 1\}^{H \times W}$ nhằm tạo ra ma trận mặt nạ phân vùng nhị phân mặt đất (Ground-truth Binary Mask) $M \in \{0, 1\}^{H \times W}$ thỏa mãn điều kiện:
+\begin{equation}
+    M(x, y) = \begin{cases} 
+    1 & \text{nếu điểm ảnh } (x, y) \text{ thuộc vùng vật chất bị hư hỏng, khuyết tật} \\ 
+    0 & \text{nếu điểm ảnh } (x, y) \text{ thuộc bề mặt sản phẩm bình thường} 
+    \end{cases}
+\end{equation}
+
+Khác với bài toán phân lớp ảnh nhị phân (chỉ trả về một nhãn tổng thể $y \in \{0, 1\}$ cho toàn bộ ảnh), bài toán phân vùng khuyết tật đòi hỏi thuật toán phải trích xuất chính xác ranh giới không gian, diện tích và hình thái học của từng tổn thương. Điều này cho phép hệ thống phân loại chính xác mức độ nguy hại của lỗi và kích hoạt các phản ứng cơ học phù hợp trên băng chuyền tự động.
+
+\section{Cơ sở lý thuyết và kiến thức liên quan}
+
+Để giải quyết bài toán phát hiện và phân vùng khuyết tật, đề tài vận dụng các cơ sở lý thuyết toán học và xử lý tín hiệu ảnh 2 chiều sau:
+
+\subsection{Lý thuyết biểu diễn ảnh số và không gian màu}
+
+Ảnh số là sự rời rạc hóa của tín hiệu quang học liên tục trong không gian 2 chiều. Trong không gian màu chuẩn RGB, mỗi kênh màu đại diện cho một phổ phản xạ ánh sáng cụ thể. Khi chuyển đổi sang ảnh mức xám (Grayscale), cường độ sáng $Y(x, y)$ được tổng hợp theo tiêu chuẩn ITU-R BT.601:
+\begin{equation}
+    Y(x, y) = 0.299 \cdot R(x, y) + 0.587 \cdot G(x, y) + 0.114 \cdot B(x, y)
+\end{equation}
+Trong đó:
+\begin{itemize}
+    \item $R(x, y), G(x, y), B(x, y)$ là giá trị cường độ sáng của 3 kênh màu đỏ, lục, lam tại tọa độ $(x, y)$.
+    \item $Y(x, y)$ là độ chói đại diện, thường được sử dụng làm cơ sở để phân ngưỡng hoặc trích xuất mặt nạ tiền cảnh.
+\end{itemize}
+
+\subsection{Biến đổi Fourier 2 chiều rời rạc (2D-DFT)}
+
+Biến đổi Fourier là công cụ nền tảng trong xử lý tín hiệu, cho phép chuyển đổi ảnh từ miền không gian (Spatial Domain) sang miền tần số (Frequency Domain). Đối với ảnh số kích thước $H \times W$, phép biến đổi Fourier 2 chiều rời rạc (2D Discrete Fourier Transform -- 2D-DFT) được định nghĩa bởi \cite{gonzalez2018}:
+\begin{equation}
+    F(u, v) = \sum_{x=0}^{H-1} \sum_{y=0}^{W-1} I(x, y) \cdot e^{-j 2\pi \left(\frac{ux}{H} + \frac{vy}{W}\right)}
+\end{equation}
+Trong đó:
+\begin{itemize}
+    \item $x, y$ là tọa độ không gian điểm ảnh ($0 \le x < H, 0 \le y < W$).
+    \item $u, v$ là tọa độ tần số trong miền Fourier (tần số không gian theo phương dọc và phương ngang).
+    \item $j = \sqrt{-1}$ là đơn vị ảo của số phức.
+    \item $F(u, v) = R(u, v) + j I(u, v)$ là ma trận phổ tần số phức.
+\end{itemize}
+
+Từ ma trận số phức $F(u, v)$, phổ biên độ $|F(u, v)|$ và phổ pha $\phi(u, v)$ được xác định bởi:
+\begin{equation}
+    |F(u, v)| = \sqrt{R(u, v)^2 + I(u, v)^2}, \quad \phi(u, v) = \arctan\left(\frac{I(u, v)}{R(u, v)}\right)
+\end{equation}
+
+Nguyên lý quan trọng nhất của biến đổi Fourier 2D áp dụng trong công nghiệp là: \textbf{Các cấu trúc tuần hoàn lặp đi lặp lại trong miền không gian (như mắt lưới dệt hay sợi vải) sẽ tập trung năng lượng vào các đỉnh phổ nhọn đối xứng rời rạc trong miền tần số}. Ngược lại, các khuyết tật bất thường (vết rách, đứt sợi) mang tính phi tuần hoàn và phân bố năng lượng trải rộng khắp phổ. Phép biến đổi Fourier nghịch đảo (2D-IDFT) cho phép khôi phục ma trận không gian:
+\begin{equation}
+    I(x, y) = \frac{1}{HW} \sum_{u=0}^{H-1} \sum_{v=0}^{W-1} F(u, v) \cdot e^{j 2\pi \left(\frac{ux}{H} + \frac{vy}{W}\right)}
+\end{equation}
+
+\subsection{Biến đổi sóng con rời rạc 2 chiều (2D-DWT)}
+
+Hạn chế của biến đổi Fourier là mất hoàn toàn thông tin định vị không gian (khi chuyển sang miền tần số, ta không biết tần số đó xuất hiện tại tọa độ nào trong ảnh). Biến đổi sóng con (Wavelet Transform) giải quyết triệt để vấn đề này nhờ khả năng phân tích đa độ phân giải (Multi-resolution Analysis) đồng thời trên cả miền thời gian/không gian và miền tần số \cite{mallat2008}.
+
+Phép biến đổi sóng con rời rạc 2 chiều (2D Discrete Wavelet Transform -- 2D-DWT) phân rã ảnh đầu vào $I(x, y)$ thông qua ngân hàng bộ lọc thông thấp $h[n]$ và thông cao $g[n]$ theo hai phương ngang và dọc, kèm theo bước giảm mẫu (downsampling) hệ số 2. Kết quả phân rã tạo ra 4 dải tần số con:
+\begin{itemize}
+    \item \textbf{Dải $LL$ (Low-Low):} Xấp xỉ tần số thấp theo cả hai phương, chứa phần lớn năng lượng và nội dung hình ảnh mờ của bề mặt.
+    \item \textbf{Dải $LH$ (Low-High):} Thông thấp phương ngang, thông cao phương dọc; biểu diễn các chi tiết biên cạnh nằm ngang.
+    \item \textbf{Dải $HL$ (High-Low):} Thông cao phương ngang, thông thấp phương dọc; biểu diễn các chi tiết biên cạnh thẳng đứng.
+    \item \textbf{Dải $HH$ (High-High):} Thông cao theo cả hai hướng, chứa các góc nhọn, đường chéo và các thành phần tần số cực cao.
+\end{itemize}
+
+Đối với sóng con Haar -- họ sóng con đơn giản và trực giao nhất -- các phương trình phân rã 4 dải con tại mức 1 được tính toán trực tiếp từ các khối điểm ảnh $2 \times 2$:
+\begin{equation}
+    I_{LL}(i, j) = \frac{1}{2}\Big(I(2i, 2j) + I(2i+1, 2j) + I(2i, 2j+1) + I(2i+1, 2j+1)\Big)
+\end{equation}
+\begin{equation}
+    I_{HH}(i, j) = \frac{1}{2}\Big(I(2i, 2j) - I(2i+1, 2j) - I(2i, 2j+1) + I(2i+1, 2j+1)\Big)
+\end{equation}
+
+Biến đổi sóng con 2D nghịch đảo (2D-IDWT) khôi phục hoàn hảo ma trận ảnh gốc mà không làm suy giảm tín hiệu nếu không có phép cắt lọc dải tần.
+
+\subsection{Giải tích vi phân và phương trình Poisson trong ghép ảnh liền mạch}
+
+Khi ghép một mảng khuyết tật từ vùng này sang vùng khác trên bề mặt sản phẩm, phép dán đè trực tiếp (Alpha/CutPaste blending) thường tạo ra ranh giới cắt sắc nhọn giả tạo (sharp border artifact) do sự chênh lệch đột ngột về cường độ sáng nền.
+
+Thuật toán ghép ảnh Poisson (Poisson Image Editing) do Pérez và các cộng sự đề xuất \cite{perez2003} giải quyết vấn đề này bằng cách giải bài toán biên Dirichlet trên trường đạo hàm (gradient field). Gọi $\Omega$ là miền đóng chứa khuyết tật cần cấy ghép với đường biên $\partial \Omega$. Cho ảnh nguồn $I_s$ và ảnh đích $I_d$, ta mong muốn tìm hàm ảnh kết quả $f$ trên miền $\Omega$ sao cho trường gradient của $f$ xấp xỉ trường gradient đích $\mathbf{v} = \nabla I_s$, đồng thời thỏa mãn điều kiện biên khớp hoàn toàn với ảnh đích trên $\partial \Omega$:
+\begin{equation}
+    \min_{f} \iint_{\Omega} \|\nabla f - \mathbf{v}\|^2 \, dx dy \quad \text{với điều kiện } f|_{\partial \Omega} = I_d|_{\partial \Omega}
+\end{equation}
+Phương trình Euler-Lagrange liên kết với bài toán tối ưu trên dẫn trực tiếp đến phương trình đạo hàm riêng Poisson:
+\begin{equation}
+    \Delta f = \operatorname{div} \mathbf{v} \quad \text{trên } \Omega, \quad \text{với } f|_{\partial \Omega} = I_d|_{\partial \Omega}
+\end{equation}
+Trong đó:
+\begin{itemize}
+    \item $\Delta = \frac{\partial^2}{\partial x^2} + \frac{\partial^2}{\partial y^2}$ là toán tử Laplace 2 chiều.
+    \item $\operatorname{div} \mathbf{v} = \frac{\partial v_x}{\partial x} + \frac{\partial v_y}{\partial y}$ là độ phân kỳ (divergence) của trường vector gradient.
+\end{itemize}
+Nhờ việc giải phương trình vi phân Poisson, khuyết tật sinh ra được "hòa tan" một cách liền mạch vào ánh sáng tổng thể của bề mặt sản phẩm mà vẫn bảo toàn nguyên vẹn cấu trúc hoa văn chi tiết của khuyết tật.
+
+\section{Các hướng tiếp cận và phương pháp xử lý ảnh liên quan}
+
+Để định vị vị trí của nghiên cứu này trong bức tranh tổng thể, Bảng 1 so sánh các hướng tiếp cận chính đối với bài toán kiểm tra khuyết tật bề mặt sản phẩm công nghiệp.
+
+\begin{table}[h]
+\centering
+\caption{So sánh các hướng tiếp cận kiểm tra khuyết tật bề mặt công nghiệp}
+\label{tab:approach_comparison}
+\begin{tabularx}{\textwidth}{p{3.2cm} X X X}
+\toprule
+\textbf{Phương pháp} & \textbf{Nguyên lý xử lý} & \textbf{Ưu điểm} & \textbf{Hạn chế} \\
+\midrule
+Xử lý ảnh truyền thống \cite{gonzalez2018} & Lọc không gian, phân ngưỡng Otsu, trừ nền, bộ lọc Gabor. & Tốc độ tính toán nhanh, không cần dữ liệu huấn luyện, dễ giải thích. & Rất nhạy cảm với thay đổi ánh sáng, khó áp dụng cho bề mặt phức tạp. \\
+\addlinespace
+Tái tạo học sâu (AE / GAN) \cite{bergmann2019} & Học biểu diễn dữ liệu lành qua Autoencoder, tính sai số $\|I - \hat{I}\|$. & Không cần nhãn khuyết tật, học được đặc trưng ngữ nghĩa mức cao. & Ảnh tái tạo thường bị nhòe biên, dễ tái tạo nhầm cả khuyết tật lớn. \\
+\addlinespace
+Sinh mẫu khuyết tật tổng hợp \cite{li2021, zavrtanik2021, schluter2022} & Cấy ghép khuyết tật nhân tạo (CutPaste, DRAEM, NSA) trực tiếp lên ảnh lành. & Biến bài toán thành phân vùng có giám sát, đa dạng hóa hình thái lỗi. & Cần thiết kế thuật toán sinh lỗi phù hợp với từng chất liệu bề mặt. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Hướng tiếp cận của đề tài này tập trung vào nhóm \textbf{Sinh mẫu khuyết tật tổng hợp}, đồng thời kết hợp các kỹ thuật xử lý miền tần số để tối ưu hóa đặc trưng trước khi đưa vào phân vùng.
+
+\section{Các thuật toán và công nghệ được sử dụng}
+
+Hệ thống được thiết kế và triển khai dựa trên các công nghệ và thuật toán cụ thể sau:
+\begin{itemize}
+    \item \textbf{Nhóm thuật toán sinh khuyết tật (Group A):}
+    \begin{itemize}
+        \item \textit{CutPaste Synthesizer:} Biến đổi Affine và dán mảng ảnh cục bộ \cite{li2021}.
+        \item \textit{DRAEM Synthesizer:} Tạo trường vô hướng ngẫu nhiên bằng Perlin Noise đa tỉ lệ và hòa trộn Beta Blending phi tuyến \cite{zavrtanik2021}.
+        \item \textit{NSA Synthesizer:} Tách tiền cảnh bằng phân ngưỡng Otsu và ghép ảnh Poisson liền mạch \cite{schluter2022}.
+    \end{itemize}
+    \item \textbf{Nhóm xử lý miền tần số (Group B):}
+    \begin{itemize}
+        \item \textit{2D-FFT Notch Filter:} Triệt tiêu đỉnh phổ tuần hoàn bằng bộ lọc chặn dải Gauss.
+        \item \textit{2D-DWT Detail Boost:} Phân rã sóng con đa mức và khuếch đại dải chi tiết cao $LH, HL, HH$.
+    \end{itemize}
+    \item \textbf{Nhóm kiểm thử độ bền quang học (Group C):}
+    \begin{itemize}
+        \item \textit{MVTec-AD-C Corruptions Engine:} Mô phỏng 4 loại biến dạng quang học qua 5 mức độ nghiêm trọng \cite{horwitz2022}.
+    \end{itemize}
+    \item \textbf{Công nghệ nơ-ron và định dạng nhãn:}
+    \begin{itemize}
+        \item \textit{YOLOSegExporter:} Thuật toán trích xuất biên Suzuki-Abe \cite{suzuki1985} và xấp xỉ đa giác Douglas-Peucker chuẩn hóa tọa độ $[0.0, 1.0]$.
+        \item \textit{YOLOv11-seg:} Kiến trúc phân vùng thực thể thời gian thực dựa trên backbone C3k2 và head C2f-PSA.
+    \end{itemize}
+\end{itemize}
+
+\begin{table}[h]
+\centering
+\caption{Hệ thống thư viện phần mềm và phiên bản xác thực trong dự án}
+\label{tab:libraries}
+\begin{tabularx}{\textwidth}{l l X}
+\toprule
+\textbf{Thư viện} & \textbf{Phiên bản} & \textbf{Vai trò chức năng trong dự án} \\
+\midrule
+\texttt{python} & 3.11.9 & Ngôn ngữ lập trình chính cho toàn bộ pipeline xử lý ảnh. \\
+\texttt{numpy} & 2.4.6 & Tính toán ma trận điểm ảnh đa chiều, phép biến đổi mảng số. \\
+\texttt{opencv-python} & 5.1.0.95 & Phép biến đổi Affine, Poisson seamlessClone, Otsu, contours. \\
+\texttt{PyWavelets} & 1.8.0 & Biến đổi sóng con 2 chiều 2D-DWT và nghịch đảo 2D-IDWT. \\
+\texttt{scipy} & 1.17.1 & Tính toán bộ lọc tín hiệu, tích chập nhân mờ, thống kê phổ. \\
+\texttt{scikit-learn} & 1.9.1 & Tính toán chỉ số ROC-AUC và diện tích dưới đường cong AUROC. \\
+\texttt{pandas} & 3.1.1 & Quản lý bảng dữ liệu kết quả và ma trận thực nghiệm cắt bỏ. \\
+\texttt{pytest} & 9.2.0 & Khung kiểm thử tự động (đạt 34/34 bài test đơn vị). \\
+\texttt{ultralytics} & $\ge 8.4.0$ & Huấn luyện và đánh giá mô hình phân vùng thực thể YOLOv11-seg. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\section{Những thách thức trong bài toán}
+
+Trong quá trình triển khai thực tế, bài toán phân vùng khuyết tật bề mặt sản phẩm công nghiệp đặt ra các thách thức lớn cần giải quyết:
+\begin{enumerate}
+    \item \textbf{Vấn đề kích thước ảnh không chia hết cho lũy thừa của 2:} Nhiều sản phẩm thực tế có độ phân giải không đồng nhất (ví dụ: chai thủy tinh `bottle` kích thước $900 \times 900$, viên thuốc `pill` kích thước $800 \times 800$, gạch men `tile` kích thước $840 \times 840$). Thuật toán sinh Perlin noise nguyên bản của DRAEM \cite{zavrtanik2021} giả định kích thước là lũy thừa của 2, dẫn đến lỗi sai lệch số chiều ma trận khi chia lưới bước nhảy. Hệ thống cần có giải pháp chuẩn hóa lưới tạo nhiễu trên không gian chuẩn $512 \times 512$ trước khi nội suy thích nghi.
+    \item \textbf{Hiện tượng báo động giả (False Alarms):} Khi mô hình được huấn luyện hoàn toàn trên dữ liệu khuyết tật tổng hợp, mô hình có xu hướng dự báo mọi biến đổi nhỏ đều là khuyết tật. Do đó, việc duy trì một tỷ lệ mẫu âm tính có kiểm soát (\texttt{good\_ratio = 0.15}) gồm các ảnh lành mang mặt nạ hoàn toàn số 0 là yêu cầu bắt buộc để ổn định tỷ lệ báo động giả FAR@0.25.
+    \item \textbf{Suy thoái quang học môi trường khắc nghiệt:} Trong dây chuyền sản xuất thực tế, rung chấn cơ học tạo ra vệt mờ chuyển động (Motion blur), thấu kính bị rung lắc gây mất nét (Defocus blur), và cảm biến camera bị tăng nhiệt sinh ra nhiễu hạt (Gaussian noise). Các thuật toán tiền xử lý phải chứng minh được độ bền vững khi ảnh đầu vào bị biến dạng nghiêm trọng.
+\end{enumerate}
+
+\section{Kết luận chương I}
+
+Chương I đã hệ thống hóa cơ sở lý thuyết toán học của bài toán phân vùng khuyết tật bề mặt công nghiệp, định nghĩa toán học rõ ràng về ma trận ảnh và mặt nạ điểm ảnh nhị phân. Các lý thuyết xử lý ảnh nền tảng bao gồm biến đổi Fourier 2D rời rạc, biến đổi sóng con đa mức 2D-DWT và phương trình Poisson trong không gian 2 chiều đã được trình bày tường minh, tạo tiền đề vững chắc cho việc xây dựng các mô-đun thuật toán chi tiết trong Chương II.
