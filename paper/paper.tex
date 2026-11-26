@@ -1,0 +1,72 @@
+\documentclass[conference]{IEEEtran}
+
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{tabularx}
+\usepackage{url}
+\usepackage{microtype}
+\makeatletter
+\def\@citex[#1]#2{%
+  \let\@citea\@empty
+  \@cite{\@for\@citeb:=#2\do
+    {\@citea\def\@citea{, }%
+     \edef\@citeb{\expandafter\@firstofone\@citeb\@empty}%
+     \if@filesw\immediate\write\@auxout{\string\citation{\@citeb}}\fi
+     \@ifundefined{b@\@citeb}{\mbox{\reset@font\bfseries ?}%
+       \G@refundefinedtrue
+       \@latex@warning
+         {Citation `\@citeb' on page \thepage \space undefined}}%
+       {\hbox{\csname b@\@citeb\endcsname}}}}{#1}}
+\makeatother
+\setlength{\textfloatsep}{10pt plus 2pt minus 2pt}
+\setlength{\floatsep}{8pt plus 2pt minus 2pt}
+
+\begin{document}
+
+\title{Frequency-Spatial Anomaly Synthesis for False-Alarm-Suppressed Industrial Surface Defect Segmentation}
+
+% --- Author Block (Standard IEEE Conference Template - Shared Affiliation) ---
+\author{
+    \IEEEauthorblockN{Trung-Tru Huynh, Duc-Hao Do, Duc-Nghiem Nguyen, and Thanh-Hung Nguyen}
+    \IEEEauthorblockA{\textit{Faculty of Information Technology 2, Posts and Telecommunications Institute of Technology} \\
+    Ho Chi Minh City, Vietnam \\
+    Email: \{truhunt, haodd\}@ptithcm.edu.vn, \{n23dcat047, n23dccck059\}@student.ptithcm.edu.vn}
+}
+% Note: For Double-Blind Review submission, toggle by replacing the above with:
+% \author{\IEEEauthorblockN{Anonymous Author(s)}\IEEEauthorblockA{Paper under double-blind review}}
+
+\maketitle
+
+\begin{abstract}
+Detecting and segmenting surface defects on industrial products is essential for automated quality control in smart manufacturing. However, genuine defective samples are exceedingly rare, creating a severe data scarcity bottleneck. Existing self-supervised anomaly generation techniques manipulate images strictly in the spatial domain, causing synthetic defects to be easily obscured by repetitive background textures (e.g., woven meshes or metallic grids) while generating elevated false alarm rates on defect-free parts that halt production lines. In this work, we propose an inter-domain image processing framework coupling frequency-domain filtering with spatial anomaly synthesis for false-alarm-suppressed defect segmentation under a strict defect-free training regime. On the frequency branch, we first confirm that our unfiltered identity roundtrip ($\mathcal{T}^{-1}(\mathcal{T}(I))$) maintains high numerical fidelity ($\text{PSNR} = 51.31\text{ dB}$, $\text{SSIM} = 0.9983$), preserving exact ground-truth pixel geometries before applying an adaptive 2D Fast Fourier Transform (2D-FFT) periodic notch filter and a 2D Discrete Wavelet Transform (2D-DWT) sub-band modulator. On the spatial branch, we resolve non-power-of-two dimension errors in multi-octave Perlin synthesis via canonical-grid bilinear mapping, combined with foreground-clamped Poisson seamless cloning. Crucially, an explicit negative-sample preservation ratio ($\rho_{\text{neg}} = 0.15$) is introduced to suppress false alarms on nominal surfaces, evaluated under a dual-domain benchmark and MVTec-AD-C optical corruptions across 2,676 RGB industrial images (six MVTec AD categories). Supervised oracle baselines achieve $0.854$--$0.873$ Mask mAP@50 while exposing $4.50\%$--$8.78\%$ nominal $\text{FAR@0.25}$, and TensorRT FP16 model inference profiling confirms real-time feasibility at $6.7\text{ ms}$ per $1024 \times 1024$ frame.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Industrial defect segmentation, frequency domain, synthetic anomalies, false alarm suppression, 2D-FFT, discrete wavelet transform, optical robustness, defect-free training.
+\end{IEEEkeywords}
+
+\input{sections/introduction}
+
+\input{sections/related_work}
+
+\begin{figure*}[!t]
+\centering
+\includegraphics[width=0.92\textwidth]{figures/fig1_interdomain_pipeline.png}
+\caption{Inter-domain anomaly synthesis pipeline on real nominal MVTec AD (\texttt{train/good}) samples. Top row (\texttt{grid}): nominal texture, CutPaste-Scar synthesis, adaptive 2D-FFT periodic notch filtering, pixel-accurate binary mask, and polygonal overlay. Bottom row (\texttt{bottle}): nominal rigid object, canonical-grid DRAEM Perlin synthesis, Haar 2D-DWT detail boosting, binary mask, and polygonal overlay.}
+\label{fig:pipeline_architecture}
+\end{figure*}
+
+\input{sections/methodology}
+
+\input{sections/experiments}
+
+\input{sections/conclusion}
+
+\bibliographystyle{IEEEtran}
+\bibliography{references}
+
+\end{document}

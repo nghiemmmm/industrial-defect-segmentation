@@ -1,0 +1,102 @@
+\section{Proposed Methodology}
+\label{sec:methodology}
+
+\subsection{Problem Formulation and Defect-Free Training Regime}
+Let $I \in \mathbb{R}^{H \times W \times C}$ denote an industrial surface inspection image with spatial height $H$, width $W$, and $C=3$ color channels. Under a strict defect-free training regime, the available training set consists exclusively of nominal, defect-free reference images:
+\begin{equation}
+\mathcal{D}_{\text{train}} = \{I_k \in \mathbb{R}^{H \times W \times C} \mid I_k \text{ is nominal}\}_{k=1}^{N_{\text{train}}}
+\end{equation}
+The testing set $\mathcal{D}_{\text{test}} = \{(I_i, M_i^*)\}_{i=1}^{N_{\text{test}}}$ contains genuine defective and nominal production parts paired with pixel-precise binary ground-truth masks $M_i^* \in \{0, 1\}^{H \times W}$, where $M_i^*(x, y) = 1$ denotes anomalous material and $0$ represents nominal background.
+
+Following standard leak-free evaluation protocol, no image, bounding box, or defect morphology from $\mathcal{D}_{\text{test}}$ is observed during anomaly synthesis or model optimization. All synthetic defect variations are generated strictly from $\mathcal{D}_{\text{train}}$, following the inter-domain pipeline illustrated in Fig.~\ref{fig:pipeline_architecture}. Specifically, let $\mathcal{G}_{\text{spatial}}$ denote the spatial anomaly synthesizer producing a synthetic image--mask pair $(I_{\text{syn}}, M) = \mathcal{G}_{\text{spatial}}(I)$ from a nominal image $I \in \mathcal{D}_{\text{train}}$, and let $\mathcal{T}_{\text{freq}}$ denote the material-adaptive frequency-domain operator (2D-FFT notch filtering for periodic textures or 2D-DWT sub-band modulation for homogeneous objects). The inter-domain training sample is constructed as:
+\begin{equation}
+\label{eq:inter_domain}
+\tilde{I}_{\text{syn}} = \mathcal{T}_{\text{freq}}\!\left(I_{\text{syn}}\right), \quad \text{paired with mask } M \in \{0, 1\}^{H \times W}
+\end{equation}
+Because $\mathcal{T}_{\text{freq}}$ in \eqref{eq:inter_domain} is strictly coordinate-preserving, $M$ remains pixel-aligned with $\tilde{I}_{\text{syn}}$. At inference time, each unseen test image $I_{\text{test}} \in \mathcal{D}_{\text{test}}$ is passed through the identical operator $\tilde{I}_{\text{test}} = \mathcal{T}_{\text{freq}}(I_{\text{test}})$ to guarantee spectral domain consistency between training and deployment.
+
+\subsection{Frequency-Domain Preprocessing}
+
+\subsubsection{Adaptive 2D-FFT Periodic Notch Filter}
+For structured surface textures (e.g., woven \texttt{carpet} or wire mesh \texttt{grid}), nominal spatial intensities exhibit strong 2D periodicity. To preserve chromatic fidelity and prevent color shifts, both frequency-domain operators convert the RGB input into YCrCb space and process exclusively the luminance channel $I_Y \in \mathbb{R}^{H \times W}$, retaining the original $C_r$ and $C_b$ chrominance channels unchanged. The 2D Discrete Fourier Transform maps spatial coordinates $(x, y)$ into the orthogonal frequency domain $(u, v)$ \cite{gonzalez2018digital}:
+\begin{equation}
+F_Y(u, v) = \sum_{x=0}^{H-1} \sum_{y=0}^{W-1} I_Y(x, y) e^{-j 2\pi \left(\frac{ux}{H} + \frac{vy}{W}\right)}
+\end{equation}
+Centering zero-frequency at $(u_0, v_0) = (H/2, W/2)$ yields the centered amplitude spectrum $|F_Y(u, v)|$. Periodic lattice components concentrate high spectral energy into sharp, symmetric impulses. Because the high-energy central DC impulse would skew standard mean and variance estimators, we detect periodic spectral peaks dynamically using an outlier-resistant median threshold outside the protected DC region:
+\begin{align}
+\label{eq:fft_peaks}
+\mathcal{S}_{\text{peaks}} = \big\{ (u, v) \mid &|F_Y(u, v)| > \tau_{\text{peak}} \cdot \operatorname{median}(|F_Y|), \notag \\
+&d(u, v) > r_{\text{inner}} \big\}
+\end{align}
+where $d(u, v) = \sqrt{(u - u_0)^2 + (v - v_0)^2}$ protects the central DC illumination region with exclusion radius $r_{\text{inner}}$, $\operatorname{median}(|F_Y|)$ is the global median of the centered amplitude spectrum, and $\tau_{\text{peak}} > 0$ is the peak sensitivity multiplier. To prevent over-filtering, $\mathcal{S}_{\text{peaks}}$ is capped at the top $N_{\max}$ strongest impulses sorted by magnitude.
+
+Around each identified spectral peak pair $(u_k, v_k) \in \mathcal{S}_{\text{peaks}}$ with $k = 1, \dots, K$ (where $K = |\mathcal{S}_{\text{peaks}}| / 2$ denotes the number of conjugate-symmetric peak pairs), we construct an adaptive multi-notch Gaussian reject transfer function:
+\begin{equation}
+\label{eq:notch}
+H_{\text{notch}}(u, v) = \prod_{k=1}^K \left[ 1 - \exp\left( -\frac{D_k(u, v) D_{-k}(u, v)}{2 r_0^2} \right) \right]
+\end{equation}
+where $D_k(u, v) = \sqrt{(u - u_k)^2 + (v - v_k)^2}$, $D_{-k}(u, v) = \sqrt{(u - (2u_0 - u_k))^2 + (v - (2v_0 - v_k))^2}$ denotes the conjugate-symmetric impulse across the DC center, and $r_0 > 0$ defines the notch rejection radius. Multiplying the shifted complex spectrum by $H_{\text{notch}}(u, v)$ in \eqref{eq:notch}, executing the 2D Inverse Fast Fourier Transform (2D-IFFT), and recombining the filtered luminance with the original $C_r, C_b$ channels selectively attenuates periodic structural lattice energy while preserving non-periodic micro-cracks and fiber tears.
+
+\subsubsection{2D-DWT Wavelet Sub-Band Modulation}
+To amplify subtle edge anomalies on homogeneous materials (e.g., glass \texttt{bottle} contours or metallic \texttt{screw} threads) and build resilience against optical defocus blur, we apply a 2D Discrete Wavelet Transform using orthogonal Haar basis filters to the luminance channel $I_Y$ \cite{mallat2008wavelet}:
+\begin{equation}
+I_Y(x, y) \xrightarrow{\text{2D-DWT}} \{I_{LL}, I_{LH}, I_{HL}, I_{HH}\}
+\end{equation}
+where $I_{LL}$ preserves the macroscopic low-frequency approximation, while $I_{LH}, I_{HL}, I_{HH}$ capture horizontal, vertical, and diagonal high-frequency gradient sub-bands. We modulate sub-band energy by attenuating background low frequencies ($0 < \alpha < 1$) while boosting high-frequency boundary gradients ($\gamma > 1$) independently across all directional detail sub-bands:
+\begin{align}
+\tilde{I}_{LL} &= \alpha \cdot I_{LL} \\
+\tilde{I}_{\theta} &= \gamma \cdot I_{\theta}, \quad \forall \theta \in \{LH, HL, HH\} \label{eq:dwt_mod}
+\end{align}
+Applying the 2D Inverse Discrete Wavelet Transform (2D-IDWT) to \eqref{eq:dwt_mod} and converting back to RGB yields the reconstructed spatial image $\tilde{I}$, exhibiting sharpened defect boundaries while mitigating low-frequency optical defocus smear.
+
+\subsubsection{Coordinate-Preserving Spatial Invariance}
+A critical requirement for frequency-domain preprocessing in pixel-level segmentation pipelines is coordinate-preserving spatial invariance: the transformation must not introduce phase drift or geometric warping that misaligns spatial ground-truth masks. Because both the 2D-DFT with zero-phase symmetric notch transfer functions ($H_{\text{notch}}(u, v) \in \mathbb{R}_{\ge 0}$) and the orthogonal Haar 2D-DWT are invertible linear transforms, their unfiltered identity roundtrip $\mathcal{T}^{-1}(\mathcal{T}(I))$ theoretically satisfies $\mathcal{T}^{-1}(\mathcal{T}(I)) = I$ up to floating-point rounding and 8-bit quantization precision, guaranteeing zero spatial coordinate shift. Quantitative verification of this numerical integrity across the full benchmark is presented in Section~\ref{sec:experiments}.
+
+\subsection{Spatial Anomaly Synthesis}
+
+\subsubsection{Rigid and Scar CutPaste}
+We implement CutPaste with two distinct regimes \cite{li2021cutpaste}:
+\begin{itemize}
+    \item \textbf{Normal CutPaste:} Samples a rectangular bounding patch $P$ with bounded area ratio $a$ and aspect ratio $r_{\text{aspect}}$, rotates $P$ by a random angle $\phi$, and pastes it onto a randomly selected target coordinate.
+    \item \textbf{Scar CutPaste:} Samples narrow linear strips with small aspect ratio $r_{\text{aspect}} \ll 1$ to simulate fine metallic scratches.
+\end{itemize}
+
+\subsubsection{DRAEM Multi-Octave Perlin Noise for Arbitrary Dimensions}
+DRAEM constructs naturalistic organic anomalies by thresholding multi-octave gradient noise \cite{zavrtanik2021draem, perlin1985image}. Standard implementations divide images into octaves assuming power-of-two dimensions ($2^m$). When applied to real industrial images with non-power-of-two dimensions (e.g., $900 \times 900$ or $840 \times 840$), grid stride division produces fractional residues, causing array dimension broadcasting failures.
+
+We resolve this limitation by generating the multi-scale Perlin noise field $\mathcal{N}$ over $L$ octaves on a fixed power-of-two canonical grid $\Omega_0 \in \mathbb{R}^{S_0 \times S_0}$ with continuous spatial coordinates $(s, t)$. Let $g_i(s, t)$ represent the $i$-th noise octave computed via smooth cubic interpolation:
+\begin{equation}
+\mathcal{N}(s, t) = \sum_{i=1}^L \frac{1}{2^i} g_i(2^i s, 2^i t), \quad (s, t) \in [0, S_0]^2
+\end{equation}
+We then map the scalar field to the arbitrary target spatial dimension $(H, W)$ via continuous bilinear interpolation:
+\begin{equation}
+\mathcal{M}_{\text{perlin}}(x, y) = \mathcal{B}_{\text{linear}}\left(\mathcal{N}, \frac{S_0}{H} x, \frac{S_0}{W} y\right)
+\end{equation}
+Thresholding $\mathcal{M}_{\text{perlin}} > \tau_{\text{perlin}}$ yields smooth, seamless binary anomaly masks for any input resolution.
+
+\subsubsection{Poisson Seamless Cloning (NSA) with Foreground Clamping}
+To eliminate unrealistic boundary artifacts, Natural Synthetic Anomalies (NSA) \cite{schluter2022natural} solves Poisson's partial differential equation with Dirichlet boundary conditions \cite{perez2003poisson}:
+\begin{equation}
+\Delta f = \operatorname{div} \mathbf{v} \quad \text{over } \Omega, \quad \text{with } f|_{\partial \Omega} = I_{\text{target}}|_{\partial \Omega}
+\end{equation}
+where $\Delta = \frac{\partial^2}{\partial x^2} + \frac{\partial^2}{\partial y^2}$ is the Laplacian operator, $\mathbf{v} = \nabla I_{\text{source}}$ is the guidance vector field, $\Omega$ is the synthetic defect region, and $\partial \Omega$ denotes its boundary. To prevent synthetic anomalies from appearing on non-object background regions for object categories (\texttt{screw}, \texttt{pill}, \texttt{bottle}), we integrate automated Otsu foreground thresholding \cite{otsu1979threshold}, restricting defect placement strictly to the physical product envelope.
+
+\subsection{False-Alarm Suppression via Negative Invariant}
+A severe failure mode in self-supervised anomaly models is high false alarm rate ($\text{FAR}$): networks trained purely on synthesized defective scenes learn to over-predict anomalies on normal textures. To enforce robustness without inducing train--test spectral domain mismatch, we reserve a fixed fraction $\rho_{\text{neg}} \in (0, 1)$ of each training mini-batch $\mathcal{B}$ for defect-free negative samples that bypass $\mathcal{G}_{\text{spatial}}$ yet still undergo the identical frequency preprocessing operator $\tilde{I}_{\text{clean}} = \mathcal{T}_{\text{freq}}(I)$ paired with empty polygon annotations:
+\begin{equation}
+\label{eq:neg_batch}
+\mathcal{B} = \mathcal{B}_{\text{syn}} \cup \mathcal{B}_{\text{clean}}, \quad \text{s.t.} \quad \frac{|\mathcal{B}_{\text{clean}}|}{|\mathcal{B}|} = \rho_{\text{neg}}
+\end{equation}
+This guarantees spectral consistency across $\mathcal{B}_{\text{syn}}$, $\mathcal{B}_{\text{clean}}$, and $\mathcal{D}_{\text{test}}$, while forcing the network's loss function to penalize any positive prediction on nominal surfaces.
+
+\subsection{Polygonal Vectorization and Segmentation Optimization}
+Deep instance segmentation backbones require normalized polygonal vector annotations rather than raw raster masks. For each generated binary mask $M \in \{0, 1\}^{H \times W}$, we extract external topological boundary contours $\mathcal{C} = \{p_1, p_2, \dots, p_{N_v}\}$ with $N_v$ vertices using the Suzuki-Abe border following algorithm \cite{suzuki1985topological}. Contours are simplified using the Ramer-Douglas-Peucker (RDP) algorithm \cite{douglas1973algorithms} with perimeter-proportional tolerance $\epsilon = \eta \cdot \oint_{\mathcal{C}} d\ell$ ($\eta \ll 1$, where $d\ell$ denotes differential arc length), bounding vertex counts while preserving sharp corner fidelity:
+\begin{equation}
+\max_{p \in \mathcal{C}} \operatorname{dist}(p, \overline{p_i p_j}) \le \epsilon
+\end{equation}
+Normalized vertex coordinates $(x/W, y/H) \in [0.0, 1.0]$ are formatted into standard YOLOv11-seg target structures \cite{ultralytics2024yolo11}. The single-stage segmentation network is optimized end-to-end under the weighted composite multi-task objective:
+\begin{equation}
+\label{eq:yolo_loss}
+\mathcal{L} = \lambda_{\text{box}}\mathcal{L}_{\text{box}} + \lambda_{\text{cls}}\mathcal{L}_{\text{cls}} + \lambda_{\text{mask}}\mathcal{L}_{\text{mask}} + \lambda_{\text{dfl}}\mathcal{L}_{\text{dfl}}
+\end{equation}
+where $\lambda_{\text{box}}, \lambda_{\text{cls}}, \lambda_{\text{mask}}, \lambda_{\text{dfl}} > 0$ balance bounding-box regression ($\mathcal{L}_{\text{box}}$), defect classification ($\mathcal{L}_{\text{cls}}$), prototype-based pixel mask segmentation ($\mathcal{L}_{\text{mask}}$), and distribution focal loss ($\mathcal{L}_{\text{dfl}}$). For every frequency-processed nominal sample in $\mathcal{B}_{\text{clean}}$ from \eqref{eq:neg_batch} carrying an empty polygon annotation, $\mathcal{L}_{\text{cls}}$ in \eqref{eq:yolo_loss} directly penalizes any positive confidence prediction on normal surface textures, mathematically enforcing false-alarm suppression during optimization. Exact hyperparameter values used in our experiments are detailed in Section~\ref{sec:experiments}.
