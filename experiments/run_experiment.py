@@ -9,12 +9,15 @@ Orchestrates:
 """
 
 import argparse
+import gc
 import json
 import logging
 import os
+import random
+import shutil
 import sys
 from datetime import datetime
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -52,7 +55,10 @@ def load_yaml(path: str) -> Dict[str, Any]:
         return yaml.safe_load(f)
 
 
-def build_pipelines_from_config(de_cfg: Dict[str, Any]) -> Tuple[Pipeline, Pipeline]:
+def build_pipelines_from_config(
+    de_cfg: Dict[str, Any],
+    seed: Optional[int] = None,
+) -> Tuple[Pipeline, Pipeline]:
     """
     Builds separate (train_pipeline, eval_pipeline) from YAML config.
     - train_pipeline: Spatial Synthesizer (1 - rho_neg anomaly_prob) + Frequency Filter T_freq.
@@ -72,18 +78,21 @@ def build_pipelines_from_config(de_cfg: Dict[str, Any]) -> Tuple[Pipeline, Pipel
             train_pipeline.add(CutPasteSynthesizer(
                 mode=synth_cfg.get("mode", "union"),
                 anomaly_prob=anomaly_prob,
+                seed=seed,
             ))
         elif stype == "draem":
             train_pipeline.add(DRAEMSynthesizer(
                 perlin_threshold=synth_cfg.get("perlin_threshold", 0.45),
                 beta_range=tuple(synth_cfg.get("beta_range", [0.2, 0.8])),
                 anomaly_prob=anomaly_prob,
+                seed=seed,
             ))
         elif stype == "nsa":
             train_pipeline.add(NSASynthesizer(
                 width_ratio_range=tuple(synth_cfg.get("width_ratio_range", [0.05, 0.22])),
                 height_ratio_range=tuple(synth_cfg.get("height_ratio_range", [0.05, 0.22])),
                 anomaly_prob=anomaly_prob,
+                seed=seed,
             ))
         elif stype == "material_adaptive":
             tex_cfg = synth_cfg.get("texture", {})
@@ -92,11 +101,13 @@ def build_pipelines_from_config(de_cfg: Dict[str, Any]) -> Tuple[Pipeline, Pipel
                 perlin_threshold=tex_cfg.get("perlin_threshold", 0.45),
                 beta_range=tuple(tex_cfg.get("beta_range", [0.2, 0.8])),
                 anomaly_prob=float(tex_cfg.get("anomaly_prob", anomaly_prob)),
+                seed=seed,
             )
             obj_proc = NSASynthesizer(
                 width_ratio_range=tuple(obj_cfg.get("width_ratio_range", [0.05, 0.22])),
                 height_ratio_range=tuple(obj_cfg.get("height_ratio_range", [0.05, 0.22])),
                 anomaly_prob=float(obj_cfg.get("anomaly_prob", anomaly_prob)),
+                seed=seed,
             )
             train_pipeline.add(MaterialAdaptiveRouter(
                 texture_processor=tex_proc,
@@ -208,7 +219,10 @@ def run_post_train_evaluation(
 
     # Export real test split as 'val' in a dedicated eval_dataset folder for exact Ultralytics mAP
     eval_ds_dir = os.path.join(processed_dir, "test_eval")
-    eval_exporter = YOLOSegExporter(output_dir=eval_ds_dir, save_debug_masks=False)
+    if os.path.exists(eval_ds_dir):
+        shutil.rmtree(eval_ds_dir)
+    category_map = {cat: idx for idx, cat in enumerate(sorted(categories))}
+    eval_exporter = YOLOSegExporter(output_dir=eval_ds_dir, category_map=category_map, save_debug_masks=False)
     eval_exporter.export(processed_test, split="val")
     eval_yaml = os.path.join(eval_ds_dir, "dataset.yaml")
 
@@ -337,6 +351,8 @@ def main():
     exp_id = cfg.get("experiment_id", "exp_default")
     ds_cfg = cfg.get("dataset", {})
     active_seed = args.seed if args.seed is not None else ds_cfg.get("seed", 42)
+    random.seed(active_seed)
+    np.random.seed(active_seed)
 
     if args.seed is not None and args.seed != ds_cfg.get("seed", 42):
         exp_id = f"{exp_id}_seed{args.seed}"
@@ -353,8 +369,8 @@ def main():
 
     categories = ds_cfg.get("target_categories", ["grid", "carpet", "tile", "screw", "pill", "bottle"])
 
-    # 1. Pipeline Building (separate train vs eval pipelines)
-    train_pipeline, eval_pipeline = build_pipelines_from_config(cfg.get("data_engine", {}))
+    # 1. Pipeline Building (separate train vs eval pipelines, seeded deterministically)
+    train_pipeline, eval_pipeline = build_pipelines_from_config(cfg.get("data_engine", {}), seed=active_seed)
     logger.info(f"Constructed Train Pipeline: {train_pipeline}")
     logger.info(f"Constructed Eval  Pipeline: {eval_pipeline}")
 
@@ -414,42 +430,67 @@ def main():
         defect_free=defect_free_mode,
     )
 
-    train_samples = loader.load(categories=categories, split="train")
-    val_samples = loader.load(categories=categories, split="val")
-    test_samples = loader.load(categories=categories, split="test")
+    # Clean stale processed_dir to prevent duplicate image accumulation across retries
+    if os.path.exists(processed_dir):
+        logger.info(f"Cleaning existing processed dataset directory: {processed_dir}")
+        shutil.rmtree(processed_dir)
 
-    # Apply train_pipeline (synthesizer + T_freq) to nominal train/val splits
-    processed_train = train_pipeline.run(train_samples)
-    processed_val = train_pipeline.run(val_samples)
+    # Stream per category to keep peak RAM low (<1.5 GB) and guarantee fixed class IDs
+    category_map = {cat: idx for idx, cat in enumerate(sorted(categories))}
+    exporter = YOLOSegExporter(output_dir=processed_dir, category_map=category_map, save_debug_masks=False)
+    for cat in categories:
+        train_samples = loader.load(categories=[cat], split="train")
+        processed_train = train_pipeline.run(train_samples)
+        exporter.export(processed_train, split="train")
+        del train_samples, processed_train
 
-    exporter = YOLOSegExporter(output_dir=processed_dir, save_debug_masks=False)
-    exporter.export(processed_train, split="train")
-    exporter.export(processed_val, split="val")
+        val_samples = loader.load(categories=[cat], split="val")
+        processed_val = train_pipeline.run(val_samples)
+        exporter.export(processed_val, split="val")
+        del val_samples, processed_val
+        gc.collect()
 
-    # Launch Ultralytics YOLOv11-seg training
+    # Launch Ultralytics YOLOv11-seg training with standardized optimizer & absolute save_dir
     from ultralytics import YOLO
     model_cfg = cfg.get("model", {})
     weights = model_cfg.get("weights", "yolo11l-seg.pt")
     epochs = model_cfg.get("epochs", 100)
     imgsz = model_cfg.get("imgsz", 640)
     batch = model_cfg.get("batch", 16)
+    abs_out_dir = os.path.abspath(out_dir)
 
-    logger.info(f"Launching YOLOv11-seg training: {weights} on {device}...")
+    logger.info(f"Launching YOLOv11-seg training: {weights} on {device} -> {abs_out_dir}/train_run")
     yolo_model = YOLO(weights)
     yolo_model.train(
         data=os.path.join(processed_dir, "dataset.yaml"),
         epochs=epochs,
         imgsz=imgsz,
         batch=batch,
+        workers=2,
         device=device,
         seed=active_seed,
-        project=out_dir,
+        optimizer=model_cfg.get("optimizer", "AdamW"),
+        cos_lr=bool(model_cfg.get("cos_lr", True)),
+        deterministic=True,
+        cache=model_cfg.get("cache", False),
+        project=abs_out_dir,
         name="train_run",
+        exist_ok=True,
     )
 
-    # Load best checkpoint and run isolated real test evaluation
-    best_weights = os.path.join(out_dir, "train_run", "weights", "best.pt")
-    eval_model = YOLO(best_weights) if os.path.exists(best_weights) else yolo_model
+    save_dir = (
+        str(yolo_model.trainer.save_dir)
+        if getattr(yolo_model, "trainer", None) is not None
+        else os.path.join(abs_out_dir, "train_run")
+    )
+    best_weights = os.path.join(save_dir, "weights", "best.pt")
+    logger.info(f"Resolved training save_dir={save_dir} | best_weights_exists={os.path.exists(best_weights)}")
+    del yolo_model
+    gc.collect()
+
+    # Load best checkpoint and isolated real test split ONLY after training finishes
+    eval_model = YOLO(best_weights) if os.path.exists(best_weights) else YOLO(weights)
+    test_samples = loader.load(categories=categories, split="test")
     run_robustness = bool(
         cfg.get("evaluation", {}).get("robustness_benchmark", False)
         or cfg.get("robustness", {}).get("enabled", False)
@@ -465,6 +506,8 @@ def main():
         imgsz=imgsz,
         run_robustness=run_robustness,
     )
+    del test_samples, eval_model
+    gc.collect()
     logger.info(f"Experiment {exp_id} successfully completed!")
 
 

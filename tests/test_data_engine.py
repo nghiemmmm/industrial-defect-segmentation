@@ -400,3 +400,23 @@ class TestNineExperimentProtocol:
         assert len(out_eval) == 2
         assert not out_eval[0].is_anomaly
         assert not out_eval[1].is_anomaly
+
+    def test_build_pipelines_seed_reproducibility(self):
+        import random
+        from experiments.run_experiment import build_pipelines_from_config, load_yaml
+
+        cfg = load_yaml("configs/experiments/exp00_baseline.yaml")
+        base_img = np.random.RandomState(7).randint(20, 230, (128, 128, 3), dtype=np.uint8)
+
+        random.seed(42)
+        np.random.seed(42)
+        pipe_a, _ = build_pipelines_from_config(cfg["data_engine"], seed=42)
+        out_a = pipe_a.run([Sample(image=base_img.copy(), category="bottle", defect_type="good", is_anomaly=False)])[0]
+
+        random.seed(42)
+        np.random.seed(42)
+        pipe_b, _ = build_pipelines_from_config(cfg["data_engine"], seed=42)
+        out_b = pipe_b.run([Sample(image=base_img.copy(), category="bottle", defect_type="good", is_anomaly=False)])[0]
+
+        assert np.array_equal(out_a.image, out_b.image)
+        assert np.array_equal(out_a.mask, out_b.mask)
