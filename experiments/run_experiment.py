@@ -470,6 +470,7 @@ def main():
         device=device,
         seed=active_seed,
         optimizer=model_cfg.get("optimizer", "AdamW"),
+        lr0=float(model_cfg.get("lr0", 0.001)),
         cos_lr=bool(model_cfg.get("cos_lr", True)),
         deterministic=True,
         cache=model_cfg.get("cache", False),
