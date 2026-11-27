@@ -1,0 +1,44 @@
+experiment_id: "exp08_full_adaptive"
+description: "Full Inter-Domain System: Material-Adaptive (Texture: DRAEM + 2D-FFT Notch | Object: NSA + 2D-DWT Boost, rho_neg = 0.15)"
+
+dataset:
+  name: "mvtec"
+  root_dir: "./mvtec_ad"
+  target_categories: ["grid", "carpet", "tile", "screw", "pill", "bottle"]
+  defect_free: true
+  split_ratio: 0.85
+  good_ratio: 0.15
+  seed: 42
+
+data_engine:
+  synthesizer:
+    type: "material_adaptive"
+    anomaly_prob: 0.85
+    texture_categories: ["grid", "carpet", "tile"]
+    texture:
+      perlin_threshold: 0.45
+      beta_range: [0.2, 0.8]
+    object:
+      width_ratio_range: [0.05, 0.22]
+      height_ratio_range: [0.05, 0.22]
+  frequency_filter:
+    type: "material_adaptive"
+    texture_categories: ["grid", "carpet", "tile"]
+    texture:
+      tau: 3.5
+      notch_sigma: 3.5
+    object:
+      alpha: 0.5
+      gamma: 1.6
+      wavelet: "haar"
+
+model:
+  weights: "yolo11l-seg.pt"
+  imgsz: 640
+  epochs: 100
+  batch: 16
+  device: "auto"
+
+evaluation:
+  dual_domain: true
+  robustness_benchmark: false

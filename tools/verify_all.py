@@ -191,8 +191,8 @@ def run_group_b_verification(loader: MVTecLoader):
     dwt_filter = DWTSubbandFilter(alpha=0.6, gamma=1.4, wavelet="haar")
 
     # Roundtrip identity filters for numerical tolerance verification
-    fft_identity = FFTPeriodicSuppressionFilter(cutoff=500, order=1, tau=999.0)
-    dwt_identity = DWTSubbandFilter(alpha=1.0, gamma=1.0, wavelet="haar")
+    fft_identity = FFTPeriodicSuppressionFilter(tau=1e9, butterworth_cutoff=None, use_luminance=True)
+    dwt_identity = DWTSubbandFilter(alpha=1.0, gamma=1.0, wavelet="haar", use_luminance=True)
 
     for cat in ["grid", "carpet", "screw", "bottle"]:
         samples = loader.load(categories=[cat], split="train", load_images=True)

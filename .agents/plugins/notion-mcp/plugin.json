@@ -1,0 +1,5 @@
+{
+  "name": "notion-mcp",
+  "displayName": "Notion MCP Server",
+  "description": "Project-scoped official Notion MCP Server (@notionhq/notion-mcp-server) loading NOTION_TOKEN securely from the workspace .env file."
+}

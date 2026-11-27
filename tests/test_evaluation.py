@@ -192,3 +192,72 @@ class TestAblationMatrix:
         assert len(df) == 1
         assert df.iloc[0]["Experiment"] == "exp00"
         assert df.iloc[0]["Mask_mAP50"] == 0.82
+
+
+class TestPaperMetricFixes:
+    def test_pixel_auroc_penalizes_false_positives_on_good_images(self):
+        evaluator = DualDomainEvaluator(target_categories=["bottle"])
+        h, w = 32, 32
+        gt = np.zeros((h, w), dtype=np.uint8)
+        gt[8:16, 8:16] = 255
+        defect_pred = masks_to_anomaly_map([gt], [0.9], (h, w))
+
+        # Clean good prediction vs false-positive good prediction
+        clean_good_pred = np.zeros((h, w), dtype=np.float32)
+        fp_good_pred = np.full((h, w), 0.95, dtype=np.float32)
+
+        res_clean = evaluator.evaluate_category(
+            category="bottle",
+            defect_gt_masks=[gt],
+            defect_pred_maps=[defect_pred],
+            defect_max_confs=[0.9],
+            good_max_confs=[0.0],
+            good_pred_maps=[clean_good_pred],
+        )
+        res_fp = evaluator.evaluate_category(
+            category="bottle",
+            defect_gt_masks=[gt],
+            defect_pred_maps=[defect_pred],
+            defect_max_confs=[0.9],
+            good_max_confs=[0.95],
+            good_pred_maps=[fp_good_pred],
+        )
+        assert res_clean["pixel_auroc"] == pytest.approx(1.0, abs=1e-4)
+        assert res_fp["pixel_auroc"] < res_clean["pixel_auroc"]
+
+    def test_robustness_evaluator_outputs_mask_map50_and_far025(self, tmp_path):
+        evaluator = RobustnessEvaluator(
+            corruptions=["gaussian_noise"],
+            severity_levels=[1],
+            output_dir=str(tmp_path),
+        )
+        h, w = 32, 32
+        img_def = np.full((h, w, 3), 120, dtype=np.uint8)
+        img_good = np.full((h, w, 3), 100, dtype=np.uint8)
+        gt_def = np.zeros((h, w), dtype=np.uint8)
+        gt_def[8:16, 8:16] = 255
+        gt_good = np.zeros((h, w), dtype=np.uint8)
+
+        call_count = {"n": 0}
+        def mock_predict(_img):
+            idx = call_count["n"] % 2
+            call_count["n"] += 1
+            if idx == 0:
+                a_map = np.zeros((h, w), dtype=np.float32)
+                a_map[8:16, 8:16] = 0.85
+                return a_map, 0.85
+            # False alarm on good image
+            a_map = np.zeros((h, w), dtype=np.float32)
+            a_map[0:8, 0:8] = 0.40
+            return a_map, 0.40
+
+        df = evaluator.run_robustness_benchmark(
+            images=[img_def, img_good],
+            gt_masks=[gt_def, gt_good],
+            predict_fn=mock_predict,
+            experiment_id="test_table5",
+        )
+        assert "mask_mAP50" in df.columns
+        assert "far_025" in df.columns
+        assert df.iloc[0]["mask_mAP50"] == pytest.approx(1.0, abs=1e-4)
+        assert df.iloc[0]["far_025"] == pytest.approx(1.0, abs=1e-4)

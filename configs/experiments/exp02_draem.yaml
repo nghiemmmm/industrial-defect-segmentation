@@ -1,11 +1,12 @@
 experiment_id: "exp02_draem"
-description: "YOLOv11-seg with DRAEM Perlin-noise texture blending"
+description: "Canonical-grid DRAEM Perlin synthesis with negative-sample invariant (rho_neg = 0.15)"
 
 dataset:
   name: "mvtec"
   root_dir: "./mvtec_ad"
   target_categories: ["grid", "carpet", "tile", "screw", "pill", "bottle"]
-  split_ratio: 0.8
+  defect_free: true
+  split_ratio: 0.85
   good_ratio: 0.15
   seed: 42
 

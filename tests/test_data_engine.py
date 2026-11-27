@@ -293,3 +293,110 @@ class TestMVTecLoaderAndExporter:
 
         finally:
             shutil.rmtree(out_tmp, ignore_errors=True)
+
+    def test_mvtec_loader_strict_defect_free_mode(self, tmp_path):
+        """Verifies strict defect-free training regime: zero real defects in train/val, full test isolation."""
+        cat_dir = tmp_path / "bottle"
+        (cat_dir / "train" / "good").mkdir(parents=True)
+        (cat_dir / "test" / "good").mkdir(parents=True)
+        (cat_dir / "test" / "broken_small").mkdir(parents=True)
+        (cat_dir / "ground_truth" / "broken_small").mkdir(parents=True)
+
+        for i in range(10):
+            img = np.full((64, 64, 3), 100 + i, dtype=np.uint8)
+            cv2.imwrite(str(cat_dir / "train" / "good" / f"{i:03d}.png"), img)
+        for i in range(4):
+            img = np.full((64, 64, 3), 120 + i, dtype=np.uint8)
+            cv2.imwrite(str(cat_dir / "test" / "good" / f"{i:03d}.png"), img)
+        for i in range(6):
+            img = np.full((64, 64, 3), 180 + i, dtype=np.uint8)
+            mask = np.zeros((64, 64), dtype=np.uint8)
+            mask[16:32, 16:32] = 255
+            cv2.imwrite(str(cat_dir / "test" / "broken_small" / f"{i:03d}.png"), img)
+            cv2.imwrite(str(cat_dir / "ground_truth" / "broken_small" / f"{i:03d}_mask.png"), mask)
+
+        loader = MVTecLoader(
+            root_dir=str(tmp_path),
+            split_ratio=0.8,
+            seed=42,
+            defect_free=True,
+        )
+
+        train_samples = loader.load(split="train")
+        val_samples = loader.load(split="val")
+        test_samples = loader.load(split="test")
+
+        assert len(train_samples) == 8
+        assert len(val_samples) == 2
+        assert all(not s.is_anomaly for s in train_samples)
+        assert all(not s.is_anomaly for s in val_samples)
+
+        test_defects = [s for s in test_samples if s.is_anomaly]
+        test_goods = [s for s in test_samples if not s.is_anomaly]
+        assert len(test_defects) == 6
+        assert len(test_goods) == 4
+        assert all(s.has_mask() for s in test_defects)
+        assert all(not s.has_mask() for s in test_goods)
+
+
+# ==============================================================================
+# Standardized 9-Experiment Protocol (EXP-00 to EXP-08) & Material-Adaptive Tests
+# ==============================================================================
+class TestNineExperimentProtocol:
+    def test_all_nine_yaml_configs_are_valid_and_standardized(self):
+        import glob
+        import os
+        from experiments.run_experiment import build_pipelines_from_config, load_yaml
+
+        config_files = sorted(glob.glob(os.path.join("configs", "experiments", "*.yaml")))
+        assert len(config_files) == 9, f"Expected 9 experiment configs, found {len(config_files)}: {config_files}"
+
+        expected_robustness = {"exp01_cutpaste", "exp05_cutpaste_dwt"}
+        for path in config_files:
+            cfg = load_yaml(path)
+            exp_id = cfg["experiment_id"]
+            assert cfg["dataset"]["defect_free"] is True, f"{exp_id} must enforce defect_free=True"
+            assert cfg["model"]["weights"] == "yolo11l-seg.pt", f"{exp_id} must use yolo11l-seg.pt"
+            assert cfg["model"]["imgsz"] == 640, f"{exp_id} must use imgsz=640"
+
+            train_pipe, eval_pipe = build_pipelines_from_config(cfg["data_engine"])
+            assert len(train_pipe) >= 1, f"{exp_id} train_pipeline must include a spatial synthesizer"
+
+            if cfg["data_engine"].get("frequency_filter") is not None:
+                assert len(eval_pipe) == 1, f"{exp_id} eval_pipeline must apply T_freq identically"
+            else:
+                assert len(eval_pipe) == 0, f"{exp_id} eval_pipeline must be empty when frequency_filter is null"
+
+            rob_flag = bool(cfg.get("evaluation", {}).get("robustness_benchmark", False))
+            assert rob_flag == (exp_id in expected_robustness), f"Unexpected robustness_benchmark for {exp_id}"
+
+    def test_exp08_material_adaptive_routing(self):
+        from data_engine.base import MaterialAdaptiveRouter
+        from experiments.run_experiment import build_pipelines_from_config, load_yaml
+
+        cfg = load_yaml("configs/experiments/exp08_full_adaptive.yaml")
+        train_pipe, eval_pipe = build_pipelines_from_config(cfg["data_engine"])
+
+        assert len(train_pipe) == 2
+        assert isinstance(train_pipe.processors[0], MaterialAdaptiveRouter)
+        assert isinstance(train_pipe.processors[1], MaterialAdaptiveRouter)
+        assert len(eval_pipe) == 1
+        assert isinstance(eval_pipe.processors[0], MaterialAdaptiveRouter)
+
+        # Verify both texture ('grid') and object ('bottle') samples pass cleanly through train & eval
+        tex_img = np.random.randint(30, 220, (128, 128, 3), dtype=np.uint8)
+        obj_img = np.random.randint(30, 220, (128, 128, 3), dtype=np.uint8)
+        tex_sample = Sample(image=tex_img.copy(), category="grid", defect_type="good", is_anomaly=False)
+        obj_sample = Sample(image=obj_img.copy(), category="bottle", defect_type="good", is_anomaly=False)
+
+        out_train = train_pipe.run([tex_sample, obj_sample])
+        assert len(out_train) == 2
+        assert out_train[0].image.shape == (128, 128, 3)
+        assert out_train[1].image.shape == (128, 128, 3)
+
+        eval_tex = Sample(image=tex_img.copy(), category="grid", defect_type="good", is_anomaly=False)
+        eval_obj = Sample(image=obj_img.copy(), category="bottle", defect_type="good", is_anomaly=False)
+        out_eval = eval_pipe.run([eval_tex, eval_obj])
+        assert len(out_eval) == 2
+        assert not out_eval[0].is_anomaly
+        assert not out_eval[1].is_anomaly

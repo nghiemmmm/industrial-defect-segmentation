@@ -1,0 +1,5 @@
+{
+  "name": "google-drive-mcp",
+  "displayName": "Google Drive MCP Server",
+  "description": "Project-scoped official Google Drive MCP Server (https://drivemcp.googleapis.com/mcp/v1) using Streamable HTTP and OAuth 2.0."
+}

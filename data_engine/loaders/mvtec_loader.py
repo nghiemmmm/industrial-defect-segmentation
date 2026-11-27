@@ -31,6 +31,7 @@ class MVTecLoader(BaseDatasetLoader):
         include_good_train: bool = True,
         good_ratio: Optional[float] = None,
         seed: int = 42,
+        defect_free: bool = False,
         **kwargs,
     ):
         super().__init__(root_dir, **kwargs)
@@ -38,6 +39,7 @@ class MVTecLoader(BaseDatasetLoader):
         self.include_good_train = include_good_train
         self.good_ratio = good_ratio
         self.seed = seed
+        self.defect_free = defect_free
 
     def get_categories(self) -> List[str]:
         """Finds all valid category directories containing 'test' or 'ground_truth'."""
@@ -114,7 +116,8 @@ class MVTecLoader(BaseDatasetLoader):
 
             # 1. Collect anomaly samples from test/<defect_type>/
             defect_types = sorted([d for d in os.listdir(test_dir) if d != "good" and os.path.isdir(os.path.join(test_dir, d))])
-            
+
+            cat_all_test_defects: List[Dict] = []
             cat_train_defects: List[Dict] = []
             cat_val_defects: List[Dict] = []
 
@@ -122,12 +125,22 @@ class MVTecLoader(BaseDatasetLoader):
                 img_folder = os.path.join(test_dir, defect)
                 defect_gt_folder = os.path.join(gt_dir, defect)
                 img_files = sorted([f for f in os.listdir(img_folder) if f.lower().endswith(('.png', '.jpg', '.jpeg'))])
-                
-                # Shuffle deterministically per defect type
-                rng.shuffle(img_files)
-                split_idx = int(len(img_files) * self.split_ratio)
-                train_files = img_files[:split_idx]
-                val_files = img_files[split_idx:]
+
+                for f in img_files:
+                    cat_all_test_defects.append({
+                        "category": cat,
+                        "defect": defect,
+                        "img_path": os.path.join(img_folder, f),
+                        "mask_path": os.path.join(defect_gt_folder, f.rsplit(".", 1)[0] + "_mask.png"),
+                        "is_anomaly": True
+                    })
+
+                # Shuffle deterministically per defect type (supervised mode)
+                shuffled_files = list(img_files)
+                rng.shuffle(shuffled_files)
+                split_idx = int(len(shuffled_files) * self.split_ratio)
+                train_files = shuffled_files[:split_idx]
+                val_files = shuffled_files[split_idx:]
 
                 for f in train_files:
                     cat_train_defects.append({
@@ -146,9 +159,9 @@ class MVTecLoader(BaseDatasetLoader):
                         "is_anomaly": True
                     })
 
-            # 2. Collect normal (good) samples
+            # 2. Collect normal (good) samples from train/good and test/good
             good_train_imgs = []
-            if self.include_good_train and os.path.exists(os.path.join(train_dir, "good")):
+            if (self.include_good_train or self.defect_free) and os.path.exists(os.path.join(train_dir, "good")):
                 good_folder = os.path.join(train_dir, "good")
                 good_train_imgs = sorted([
                     os.path.join(good_folder, f)
@@ -157,36 +170,92 @@ class MVTecLoader(BaseDatasetLoader):
                 ])
                 rng.shuffle(good_train_imgs)
 
-            # Apply good_ratio if specified (e.g. 0.10 of defect count)
-            if self.good_ratio is not None and cat_train_defects:
-                max_good = int(len(cat_train_defects) * self.good_ratio)
-                good_train_imgs = good_train_imgs[:max_good]
+            good_test_entries: List[Dict] = []
+            test_good_folder = os.path.join(test_dir, "good")
+            if os.path.exists(test_good_folder):
+                for f in sorted(os.listdir(test_good_folder)):
+                    if f.lower().endswith(('.png', '.jpg', '.jpeg')):
+                        good_test_entries.append({
+                            "category": cat,
+                            "defect": "good",
+                            "img_path": os.path.join(test_good_folder, f),
+                            "mask_path": None,
+                            "is_anomaly": False
+                        })
 
-            # Choose entries based on requested split
+            # Choose entries based on regime and requested split
             selected_entries = []
-            if split == "train":
-                selected_entries.extend(cat_train_defects)
-                for g_path in good_train_imgs:
-                    selected_entries.append({
-                        "category": cat,
-                        "defect": "good",
-                        "img_path": g_path,
-                        "mask_path": None,
-                        "is_anomaly": False
-                    })
-            elif split == "val":
-                selected_entries.extend(cat_val_defects)
-            elif split == "all":
-                selected_entries.extend(cat_train_defects)
-                selected_entries.extend(cat_val_defects)
-                for g_path in good_train_imgs:
-                    selected_entries.append({
-                        "category": cat,
-                        "defect": "good",
-                        "img_path": g_path,
-                        "mask_path": None,
-                        "is_anomaly": False
-                    })
+            if self.defect_free:
+                # Strict Defect-Free Training Regime:
+                # train/val come exclusively from train/good; test/ remains isolated until evaluation.
+                split_idx = int(len(good_train_imgs) * self.split_ratio)
+                df_train_imgs = good_train_imgs[:split_idx]
+                df_val_imgs = good_train_imgs[split_idx:]
+
+                if split == "train":
+                    for g_path in df_train_imgs:
+                        selected_entries.append({
+                            "category": cat,
+                            "defect": "good",
+                            "img_path": g_path,
+                            "mask_path": None,
+                            "is_anomaly": False
+                        })
+                elif split == "val":
+                    for g_path in df_val_imgs:
+                        selected_entries.append({
+                            "category": cat,
+                            "defect": "good",
+                            "img_path": g_path,
+                            "mask_path": None,
+                            "is_anomaly": False
+                        })
+                elif split == "test":
+                    selected_entries.extend(cat_all_test_defects)
+                    selected_entries.extend(good_test_entries)
+                elif split == "all":
+                    for g_path in good_train_imgs:
+                        selected_entries.append({
+                            "category": cat,
+                            "defect": "good",
+                            "img_path": g_path,
+                            "mask_path": None,
+                            "is_anomaly": False
+                        })
+                    selected_entries.extend(cat_all_test_defects)
+                    selected_entries.extend(good_test_entries)
+            else:
+                # Supervised / legacy mode
+                if self.good_ratio is not None and cat_train_defects:
+                    max_good = int(len(cat_train_defects) * self.good_ratio)
+                    good_train_imgs = good_train_imgs[:max_good]
+
+                if split == "train":
+                    selected_entries.extend(cat_train_defects)
+                    for g_path in good_train_imgs:
+                        selected_entries.append({
+                            "category": cat,
+                            "defect": "good",
+                            "img_path": g_path,
+                            "mask_path": None,
+                            "is_anomaly": False
+                        })
+                elif split == "val":
+                    selected_entries.extend(cat_val_defects)
+                elif split == "test":
+                    selected_entries.extend(cat_all_test_defects)
+                    selected_entries.extend(good_test_entries)
+                elif split == "all":
+                    selected_entries.extend(cat_train_defects)
+                    selected_entries.extend(cat_val_defects)
+                    for g_path in good_train_imgs:
+                        selected_entries.append({
+                            "category": cat,
+                            "defect": "good",
+                            "img_path": g_path,
+                            "mask_path": None,
+                            "is_anomaly": False
+                        })
 
             # 3. Instantiate Sample objects
             for entry in selected_entries:

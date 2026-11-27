@@ -43,6 +43,43 @@ class BaseProcessor(ABC):
         return f"{self.name}(config={self.config})"
 
 
+DEFAULT_TEXTURE_CATEGORIES = frozenset({"grid", "carpet", "tile", "leather", "wood"})
+
+
+class MaterialAdaptiveRouter(BaseProcessor):
+    """
+    Material-adaptive processor router that dispatches each Sample to either
+    a texture-specialized processor (e.g., 2D-FFT Notch / DRAEM Perlin) or an
+    object-specialized processor (e.g., 2D-DWT Boost / NSA Poisson) based on
+    sample.category.
+    """
+
+    def __init__(
+        self,
+        texture_processor: Optional[BaseProcessor] = None,
+        object_processor: Optional[BaseProcessor] = None,
+        texture_categories: Optional[List[str]] = None,
+        name: Optional[str] = None,
+    ):
+        super().__init__(
+            name=name or "MaterialAdaptiveRouter",
+            texture_processor=getattr(texture_processor, "name", None),
+            object_processor=getattr(object_processor, "name", None),
+        )
+        self.texture_processor = texture_processor
+        self.object_processor = object_processor
+        self.texture_categories = (
+            frozenset(c.lower() for c in texture_categories)
+            if texture_categories is not None
+            else DEFAULT_TEXTURE_CATEGORIES
+        )
+
+    def process(self, sample: Sample) -> Sample:
+        is_texture = (sample.category or "").lower() in self.texture_categories
+        proc = self.texture_processor if is_texture else self.object_processor
+        return proc.process(sample) if proc is not None else sample
+
+
 class BaseDatasetLoader(ABC):
     """
     Abstract base class for industrial anomaly dataset loaders (MVTec AD, VisA, etc.).

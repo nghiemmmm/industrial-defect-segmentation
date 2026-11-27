@@ -1,11 +1,12 @@
 experiment_id: "exp01_cutpaste"
-description: "YOLOv11-seg with CutPaste synthetic anomaly generation"
+description: "CutPaste spatial synthesis with negative-sample invariant (rho_neg = 0.15) + MVTec-AD-C baseline"
 
 dataset:
   name: "mvtec"
   root_dir: "./mvtec_ad"
   target_categories: ["grid", "carpet", "tile", "screw", "pill", "bottle"]
-  split_ratio: 0.8
+  defect_free: true
+  split_ratio: 0.85
   good_ratio: 0.15
   seed: 42
 
@@ -25,4 +26,4 @@ model:
 
 evaluation:
   dual_domain: true
-  robustness_benchmark: false
+  robustness_benchmark: true

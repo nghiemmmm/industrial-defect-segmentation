@@ -151,6 +151,69 @@ def compute_false_alarm_rate(
     return float(fa_count / len(confs))
 
 
+def compute_mask_ap50(
+    gt_masks: List[np.ndarray],
+    pred_maps: List[np.ndarray],
+    pred_confs: List[float],
+    iou_threshold: float = 0.50,
+    mask_threshold: float = 0.25,
+) -> float:
+    """
+    Computes image-level Mask AP@50 (COCO 101-point interpolation) directly from
+    continuous anomaly probability maps and binary ground-truth masks.
+    Used for MVTec-AD-C corruption sweeps (Table V) without re-exporting datasets.
+    """
+    if not gt_masks or not pred_maps:
+        return 0.0
+
+    gt_is_pos = [bool(np.any(np.asarray(m) > 0)) for m in gt_masks]
+    total_gt = sum(gt_is_pos)
+    if total_gt == 0:
+        return 0.0
+
+    # Collect positive predictions (images where model predicts an anomaly mask)
+    detections = []
+    for idx, (p_map, conf) in enumerate(zip(pred_maps, pred_confs)):
+        p_bin = (np.asarray(p_map) >= mask_threshold).astype(np.uint8)
+        if conf > 0.0 and np.any(p_bin > 0):
+            detections.append((float(conf), idx, p_bin))
+
+    if not detections:
+        return 0.0
+
+    # Sort detections by descending confidence
+    detections.sort(key=lambda x: x[0], reverse=True)
+
+    tps = np.zeros(len(detections), dtype=np.float32)
+    fps = np.zeros(len(detections), dtype=np.float32)
+    matched_gt = set()
+
+    for det_i, (_conf, img_idx, p_bin) in enumerate(detections):
+        if gt_is_pos[img_idx] and img_idx not in matched_gt:
+            iou = compute_mask_iou(p_bin, gt_masks[img_idx])
+            if iou >= iou_threshold:
+                tps[det_i] = 1.0
+                matched_gt.add(img_idx)
+            else:
+                fps[det_i] = 1.0
+        else:
+            fps[det_i] = 1.0
+
+    tp_cum = np.cumsum(tps)
+    fp_cum = np.cumsum(fps)
+    recalls = tp_cum / float(total_gt)
+    precisions = tp_cum / np.maximum(tp_cum + fp_cum, 1e-12)
+
+    # COCO 101-point interpolated AP
+    recall_thresholds = np.linspace(0.0, 1.0, 101)
+    ap = 0.0
+    for r_th in recall_thresholds:
+        mask_r = recalls >= r_th
+        p_max = float(np.max(precisions[mask_r])) if np.any(mask_r) else 0.0
+        ap += p_max
+    return float(ap / 101.0)
+
+
 class DualDomainEvaluator:
     """
     Unified evaluator organizing evaluation per category and category groups
@@ -175,13 +238,24 @@ class DualDomainEvaluator:
         box_map50: float = 0.0,
         mask_map50: float = 0.0,
         mask_map50_95: float = 0.0,
+        good_pred_maps: Optional[List[np.ndarray]] = None,
     ) -> Dict[str, Any]:
         """
         Evaluates metrics for a single category.
+        Uses true predicted anomaly maps on nominal (test/good) images when
+        provided so false positives on nominal surfaces are faithfully penalized
+        in Pixel-AUROC.
         """
         # 1. Pixel-level AUROC
-        all_gt_masks = defect_gt_masks + [np.zeros_like(defect_gt_masks[0]) for _ in good_max_confs] if defect_gt_masks else []
-        all_pred_maps = defect_pred_maps + [np.zeros_like(defect_gt_masks[0]) for _ in good_max_confs] if defect_gt_masks else []
+        if good_pred_maps is not None:
+            good_gt_masks = [np.zeros(pm.shape[:2], dtype=np.uint8) for pm in good_pred_maps]
+            all_gt_masks = list(defect_gt_masks) + good_gt_masks
+            all_pred_maps = list(defect_pred_maps) + list(good_pred_maps)
+        elif defect_gt_masks:
+            all_gt_masks = list(defect_gt_masks) + [np.zeros_like(defect_gt_masks[0]) for _ in good_max_confs]
+            all_pred_maps = list(defect_pred_maps) + [np.zeros_like(defect_gt_masks[0]) for _ in good_max_confs]
+        else:
+            all_gt_masks, all_pred_maps = [], []
         pixel_auroc = compute_pixel_auroc(all_gt_masks, all_pred_maps) if all_gt_masks else 0.0
 
         # 2. Image-level AUROC

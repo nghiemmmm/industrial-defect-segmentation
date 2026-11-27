@@ -12,7 +12,13 @@ import pandas as pd
 import numpy as np
 
 from data_engine.corruptions.corruptions_engine import apply_corruption, SUPPORTED_CORRUPTIONS
-from evaluation.dual_domain_metrics import compute_pixel_auroc, compute_image_auroc, compute_mask_iou
+from evaluation.dual_domain_metrics import (
+    compute_false_alarm_rate,
+    compute_image_auroc,
+    compute_mask_ap50,
+    compute_mask_iou,
+    compute_pixel_auroc,
+)
 
 
 class RobustnessEvaluator:
@@ -55,9 +61,12 @@ class RobustnessEvaluator:
             pred_confs.append(conf)
             gt_is_anomaly.append(1 if np.any(gt_m > 0) else 0)
 
-        # Compute metrics under corruption
+        # Compute metrics under corruption (including Mask mAP@50 & FAR@0.25 for Table V)
         pixel_auroc = compute_pixel_auroc(gt_masks, pred_maps)
         image_auroc = compute_image_auroc(gt_is_anomaly, pred_confs)
+        mask_map50 = compute_mask_ap50(gt_masks, pred_maps, pred_confs)
+        good_confs = [c for c, is_anom in zip(pred_confs, gt_is_anomaly) if is_anom == 0]
+        far_025 = compute_false_alarm_rate(good_confs, conf_threshold=0.25)
 
         ious = []
         for p_m, g_m in zip(pred_maps, gt_masks):
@@ -68,6 +77,8 @@ class RobustnessEvaluator:
         return {
             "corruption": corruption_type,
             "severity": severity,
+            "mask_mAP50": round(mask_map50, 4),
+            "far_025": round(far_025, 4),
             "pixel_auroc": round(pixel_auroc, 4),
             "image_auroc": round(image_auroc, 4),
             "mean_iou": round(mean_iou, 4),
@@ -96,12 +107,17 @@ class RobustnessEvaluator:
 
         clean_p_auroc = compute_pixel_auroc(gt_masks, clean_maps)
         clean_i_auroc = compute_image_auroc(gt_is_anomaly, clean_confs)
+        clean_map50 = compute_mask_ap50(gt_masks, clean_maps, clean_confs)
+        clean_good_confs = [c for c, is_anom in zip(clean_confs, gt_is_anomaly) if is_anom == 0]
+        clean_far_025 = compute_false_alarm_rate(clean_good_confs, conf_threshold=0.25)
         clean_iou = float(np.mean([compute_mask_iou((m >= 0.5).astype(np.uint8) * 255, gm) for m, gm in zip(clean_maps, gt_masks)]))
 
         records.append({
             "experiment": experiment_id,
             "corruption": "clean",
             "severity": 0,
+            "mask_mAP50": round(clean_map50, 4),
+            "far_025": round(clean_far_025, 4),
             "pixel_auroc": round(clean_p_auroc, 4),
             "image_auroc": round(clean_i_auroc, 4),
             "mean_iou": round(clean_iou, 4),

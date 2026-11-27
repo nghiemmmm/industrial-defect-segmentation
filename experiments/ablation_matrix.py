@@ -2,7 +2,7 @@
 """
 Ablation Matrix Aggregator.
 Collects experiment results from results/experiments/*/summary.json
-and generates a consolidated Markdown and CSV comparison table across EXP-00 to EXP-11.
+and generates a consolidated Markdown and CSV comparison table across EXP-00 to EXP-08.
 """
 
 import os
@@ -85,7 +85,7 @@ def main():
     df.to_csv(csv_path, index=False)
     md_table = df_to_markdown_str(df)
     with open(md_path, "w", encoding="utf-8") as f:
-        f.write("# Consolidated Ablation Matrix (EXP-00 to EXP-11)\n\n")
+        f.write("# Consolidated Ablation Matrix (EXP-00 to EXP-08)\n\n")
         f.write(md_table)
         f.write("\n")
 
