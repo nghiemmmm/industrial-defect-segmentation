@@ -1,0 +1,269 @@
+{
+  "timestamp": "2026-11-27T16:28:57.836204",
+  "root_dir": "D:\\XULIANH\\industrial-defect-segmentation\\mvtec_ad",
+  "categories": [
+    "grid",
+    "carpet",
+    "tile",
+    "screw",
+    "pill",
+    "bottle"
+  ],
+  "dataset_totals": {
+    "train_good": 1570,
+    "test_good": 169,
+    "test_defect": 553,
+    "test_total": 722,
+    "unique_rgb_total": 2292,
+    "gt_masks": 553,
+    "total_png_files": 2845
+  },
+  "dataset_per_category": {
+    "grid": {
+      "train_good": 264,
+      "test_good": 21,
+      "test_defect": 57,
+      "test_total": 78,
+      "gt_masks": 57,
+      "unique_rgb_total": 342
+    },
+    "carpet": {
+      "train_good": 280,
+      "test_good": 28,
+      "test_defect": 89,
+      "test_total": 117,
+      "gt_masks": 89,
+      "unique_rgb_total": 397
+    },
+    "tile": {
+      "train_good": 230,
+      "test_good": 33,
+      "test_defect": 84,
+      "test_total": 117,
+      "gt_masks": 84,
+      "unique_rgb_total": 347
+    },
+    "screw": {
+      "train_good": 320,
+      "test_good": 41,
+      "test_defect": 119,
+      "test_total": 160,
+      "gt_masks": 119,
+      "unique_rgb_total": 480
+    },
+    "pill": {
+      "train_good": 267,
+      "test_good": 26,
+      "test_defect": 141,
+      "test_total": 167,
+      "gt_masks": 141,
+      "unique_rgb_total": 434
+    },
+    "bottle": {
+      "train_good": 209,
+      "test_good": 20,
+      "test_defect": 63,
+      "test_total": 83,
+      "gt_masks": 63,
+      "unique_rgb_total": 292
+    }
+  },
+  "overall": {
+    "fft_2d": {
+      "mae_mean": 0.398,
+      "mae_max": 0.6895,
+      "mse_mean": 0.4515,
+      "psnr_mean_db": 52.65,
+      "psnr_min_db": 48.65,
+      "psnr_from_mean_mse_db": 51.58,
+      "ssim_mean": 0.9968,
+      "ssim_min": 0.9913,
+      "exact_identity_count": 0,
+      "total_images": 2292,
+      "mean_cpu_latency_ms": 1581.4
+    },
+    "dwt_2d": {
+      "mae_mean": 0.6187,
+      "mae_max": 0.7842,
+      "mse_mean": 0.7152,
+      "psnr_mean_db": 49.71,
+      "psnr_min_db": 48.34,
+      "psnr_from_mean_mse_db": 49.59,
+      "ssim_mean": 0.9963,
+      "ssim_min": 0.9916,
+      "exact_identity_count": 0,
+      "total_images": 2292,
+      "mean_cpu_latency_ms": 372.12
+    }
+  },
+  "per_category": {
+    "grid": {
+      "unique_rgb_images": 342,
+      "fft_2d": {
+        "mae_mean": 0.1609,
+        "mae_max": 0.558,
+        "mse_mean": 0.1609,
+        "psnr_mean_db": 57.02,
+        "psnr_min_db": 50.66,
+        "psnr_from_mean_mse_db": 56.06,
+        "ssim_mean": 0.9991,
+        "ssim_min": 0.9978,
+        "exact_identity_count": 0,
+        "total_images": 342
+      },
+      "dwt_2d": {
+        "mae_mean": 0.4761,
+        "mae_max": 0.5405,
+        "mse_mean": 0.4761,
+        "psnr_mean_db": 51.36,
+        "psnr_min_db": 50.8,
+        "psnr_from_mean_mse_db": 51.35,
+        "ssim_mean": 0.9982,
+        "ssim_min": 0.9979,
+        "exact_identity_count": 0,
+        "total_images": 342
+      },
+      "elapsed_sec": 274.66
+    },
+    "carpet": {
+      "unique_rgb_images": 397,
+      "fft_2d": {
+        "mae_mean": 0.5086,
+        "mae_max": 0.6895,
+        "mse_mean": 0.5871,
+        "psnr_mean_db": 50.52,
+        "psnr_min_db": 48.69,
+        "psnr_from_mean_mse_db": 50.44,
+        "ssim_mean": 0.9988,
+        "ssim_min": 0.9984,
+        "exact_identity_count": 0,
+        "total_images": 397
+      },
+      "dwt_2d": {
+        "mae_mean": 0.6807,
+        "mae_max": 0.6872,
+        "mse_mean": 0.8646,
+        "psnr_mean_db": 48.76,
+        "psnr_min_db": 48.7,
+        "psnr_from_mean_mse_db": 48.76,
+        "ssim_mean": 0.9986,
+        "ssim_min": 0.9982,
+        "exact_identity_count": 0,
+        "total_images": 397
+      },
+      "elapsed_sec": 332.34
+    },
+    "tile": {
+      "unique_rgb_images": 347,
+      "fft_2d": {
+        "mae_mean": 0.5299,
+        "mae_max": 0.6472,
+        "mse_mean": 0.6241,
+        "psnr_mean_db": 50.22,
+        "psnr_min_db": 49.02,
+        "psnr_from_mean_mse_db": 50.18,
+        "ssim_mean": 0.9967,
+        "ssim_min": 0.9959,
+        "exact_identity_count": 0,
+        "total_images": 347
+      },
+      "dwt_2d": {
+        "mae_mean": 0.6784,
+        "mae_max": 0.7006,
+        "mse_mean": 0.8659,
+        "psnr_mean_db": 48.76,
+        "psnr_min_db": 48.57,
+        "psnr_from_mean_mse_db": 48.76,
+        "ssim_mean": 0.9962,
+        "ssim_min": 0.9955,
+        "exact_identity_count": 0,
+        "total_images": 347
+      },
+      "elapsed_sec": 158.71
+    },
+    "screw": {
+      "unique_rgb_images": 480,
+      "fft_2d": {
+        "mae_mean": 0.2178,
+        "mae_max": 0.5578,
+        "mse_mean": 0.2178,
+        "psnr_mean_db": 56.29,
+        "psnr_min_db": 50.67,
+        "psnr_from_mean_mse_db": 54.75,
+        "ssim_mean": 0.998,
+        "ssim_min": 0.9964,
+        "exact_identity_count": 0,
+        "total_images": 480
+      },
+      "dwt_2d": {
+        "mae_mean": 0.5378,
+        "mae_max": 0.6275,
+        "mse_mean": 0.5378,
+        "psnr_mean_db": 50.83,
+        "psnr_min_db": 50.15,
+        "psnr_from_mean_mse_db": 50.82,
+        "ssim_mean": 0.9968,
+        "ssim_min": 0.9967,
+        "exact_identity_count": 0,
+        "total_images": 480
+      },
+      "elapsed_sec": 404.75
+    },
+    "pill": {
+      "unique_rgb_images": 434,
+      "fft_2d": {
+        "mae_mean": 0.5531,
+        "mae_max": 0.6892,
+        "mse_mean": 0.6409,
+        "psnr_mean_db": 50.08,
+        "psnr_min_db": 48.65,
+        "psnr_from_mean_mse_db": 50.06,
+        "ssim_mean": 0.9926,
+        "ssim_min": 0.9913,
+        "exact_identity_count": 0,
+        "total_images": 434
+      },
+      "dwt_2d": {
+        "mae_mean": 0.6252,
+        "mae_max": 0.7338,
+        "mse_mean": 0.7518,
+        "psnr_mean_db": 49.38,
+        "psnr_min_db": 48.34,
+        "psnr_from_mean_mse_db": 49.37,
+        "ssim_mean": 0.9922,
+        "ssim_min": 0.9916,
+        "exact_identity_count": 0,
+        "total_images": 434
+      },
+      "elapsed_sec": 148.5
+    },
+    "bottle": {
+      "unique_rgb_images": 292,
+      "fft_2d": {
+        "mae_mean": 0.4338,
+        "mae_max": 0.5581,
+        "mse_mean": 0.5049,
+        "psnr_mean_db": 51.14,
+        "psnr_min_db": 49.78,
+        "psnr_from_mean_mse_db": 51.1,
+        "ssim_mean": 0.9958,
+        "ssim_min": 0.9949,
+        "exact_identity_count": 0,
+        "total_images": 292
+      },
+      "dwt_2d": {
+        "mae_mean": 0.7538,
+        "mae_max": 0.7842,
+        "mse_mean": 0.8507,
+        "psnr_mean_db": 48.83,
+        "psnr_min_db": 48.6,
+        "psnr_from_mean_mse_db": 48.83,
+        "ssim_mean": 0.9964,
+        "ssim_min": 0.9959,
+        "exact_identity_count": 0,
+        "total_images": 292
+      },
+      "elapsed_sec": 211.14
+    }
+  }
+}

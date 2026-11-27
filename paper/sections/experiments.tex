@@ -2,19 +2,19 @@
 \label{sec:experiments}
 
 \subsection{Dataset and Benchmark Setup}
-We conduct extensive experiments on the MVTec Anomaly Detection benchmark \cite{bergmann2019mvtec}, focusing on six representative surface and object categories comprising 2,676 high-resolution RGB inspection images (1,999 nominal training, 124 validation, and 553 test images) paired with 181 pixel-level ground-truth masks (2,857 image files in total):
+We conduct extensive experiments on the MVTec Anomaly Detection benchmark \cite{bergmann2019mvtec}, focusing on six representative surface and object categories comprising 2,292 unique high-resolution RGB inspection images (1,570 nominal \texttt{train/good} images and 722 \texttt{test} images containing 553 defective and 169 nominal parts) paired with 553 pixel-level ground-truth masks (2,845 PNG files in total):
 \begin{itemize}
-    \item \textbf{Texture Surfaces (3 categories):} periodic \texttt{grid} ($1024\times 1024$; 306 train, 15 val, 57 test), periodic \texttt{carpet} ($1024\times 1024$; 349 train, 20 val, 89 test), and stochastic \texttt{tile} ($840\times 840$; 295 train, 19 val, 84 test).
-    \item \textbf{Non-Periodic Rigid Objects (3 categories):} \texttt{screw} ($1024\times 1024$; 414 train, 25 val, 119 test), \texttt{pill} ($800\times 800$; 377 train, 31 val, 141 test), and \texttt{bottle} ($900\times 900$; 258 train, 14 val, 63 test).
+    \item \textbf{Texture Surfaces (3 categories):} periodic \texttt{grid} ($1024\times 1024$; 264 train, 78 test: 57 defect / 21 good), periodic \texttt{carpet} ($1024\times 1024$; 280 train, 117 test: 89 defect / 28 good), and stochastic \texttt{tile} ($840\times 840$; 230 train, 117 test: 84 defect / 33 good).
+    \item \textbf{Non-Periodic Rigid Objects (3 categories):} \texttt{screw} ($1024\times 1024$; 320 train, 160 test: 119 defect / 41 good), \texttt{pill} ($800\times 800$; 267 train, 167 test: 141 defect / 26 good), and \texttt{bottle} ($900\times 900$; 209 train, 83 test: 63 defect / 20 good).
 \end{itemize}
-Under our strict defect-free training regime, both the training and validation splits are constructed exclusively from nominal (\texttt{train/good}) images, while all real defective test images and ground-truth masks remain completely isolated until final evaluation. Separately, to establish a supervised upper-bound (oracle) reference and quantify baseline false alarm behavior, we evaluate supervised reference models across all 15 MVTec AD categories and 467 nominal test images.
+Under our strict defect-free training regime, both the training and validation splits are partitioned exclusively from the 1,570 nominal (\texttt{train/good}) images, while all 722 test images (553 real defective images with ground-truth masks and 169 nominal \texttt{test/good} parts) remain completely isolated until final evaluation. Separately, to establish a supervised upper-bound (oracle) reference and quantify baseline false alarm behavior, we evaluate supervised reference models across all 15 MVTec AD categories and 467 nominal test images.
 
 \subsection{Experimental Models and Implementation Details}
 All preprocessing and unit-test verification runs on Python 3.11, OpenCV 4.10, and PyWavelets 1.8.0, while deep segmentation training runs on PyTorch 2.4 and Ultralytics YOLOv11-seg \cite{ultralytics2024yolo11} on an NVIDIA A100-SXM4 (40 GB VRAM) GPU with automatic mixed precision (AMP) and mosaic disablement during the final 10 epochs. Our training pipeline extends the open-source industrial defect segmentation codebase \cite{kudupudi2025industrial} by integrating frequency-domain filtering, arbitrary-resolution spatial anomaly synthesis, negative-sample balancing, and MVTec-AD-C evaluation.
 
 We adopt the single-stage, anchor-free YOLOv11-seg architecture, which couples a C3k2/C2PSA multi-scale feature pyramid with a prototype-based instance mask head (\texttt{mask\_ratio} $= 4$, overlapping mask decoding). To characterize the accuracy--latency--FAR trade-off, we evaluate two capacity--resolution configurations initialized from COCO-pretrained weights \cite{lin2014microsoft}:
 \begin{itemize}
-    \item \textbf{YOLOv11l-seg ($640\times 640$):} Standardized backbone for both the supervised oracle reference and the 12-experiment defect-free ablation matrix (\texttt{EXP-00}--\texttt{EXP-11}), trained for 100 epochs with batch size 16, initial learning rate $\text{lr}_0 = 0.01$, momentum $0.937$, weight decay $5\times 10^{-4}$, 3-epoch warmup, and fixed random seed $42$.
+    \item \textbf{YOLOv11l-seg ($640\times 640$):} Standardized backbone for both the supervised oracle reference and the 9-experiment defect-free ablation matrix (\texttt{EXP-00}--\texttt{EXP-08}), trained for 100 epochs with batch size 16, initial learning rate $\text{lr}_0 = 0.01$, momentum $0.937$, weight decay $5\times 10^{-4}$, 3-epoch warmup, and fixed random seed $42$.
     \item \textbf{YOLOv11x-seg ($1024\times 1024$, tuned):} High-capacity, native-resolution supervised oracle reference trained for 150 epochs with batch size 8, weight decay $1\times 10^{-3}$, and tuned momentum $0.926$ to probe fine-texture boundary sensitivity on periodic substrates (\texttt{grid}, \texttt{carpet}) and quantify false-alarm scaling at higher spatial resolution.
 \end{itemize}
 For runtime efficiency verification (Section~\ref{subsec:efficiency}), the trained segmentation model is exported to ONNX and profiled using half-precision (FP16) TensorRT inference.
@@ -44,34 +44,38 @@ To bridge instance segmentation with industrial anomaly localization, we impleme
 \end{enumerate}
 
 \subsection{Frequency Roundtrip Numerical Integrity Verification}
-To quantitatively verify the coordinate-preserving property established in Section~\ref{sec:methodology}, we execute an identity roundtrip reconstruction test ($\mathcal{T}^{-1}(\mathcal{T}(I))$ without spectral filtering) across all 2,676 RGB MVTec AD images. As reported in Table~\ref{tab:reconstruction_metrics}, 2D-FFT achieves a Peak Signal-to-Noise Ratio of $\text{PSNR} = 51.31\text{ dB}$ and Structural Similarity Index of $\text{SSIM} = 0.9983$ \cite{wang2004image}, with Mean Absolute Error $\text{MAE} \le 0.4807$ intensity levels (on an 8-bit $0$--$255$ scale). The Haar 2D-DWT roundtrip achieves infinite PSNR and exact integer reconstruction, confirming zero geometric distortion of segmentation masks.
+To quantitatively verify the coordinate-preserving property established in Section~\ref{sec:methodology}, we execute an identity roundtrip reconstruction test ($\mathcal{T}^{-1}(\mathcal{T}(I))$ without spectral filtering) across all 2,292 unique RGB MVTec AD images in our six focus categories. As reported in Table~\ref{tab:reconstruction_metrics}, 2D-FFT achieves a mean Peak Signal-to-Noise Ratio of $\text{PSNR} = 52.65\text{ dB}$ and Structural Similarity Index of $\text{SSIM} = 0.9968$ \cite{wang2004image}, with Mean Absolute Error $\text{MAE} = 0.3980$ intensity levels (on an 8-bit $0$--$255$ scale). The Haar 2D-DWT luminance roundtrip achieves $\text{PSNR} = 49.71\text{ dB}$, $\text{SSIM} = 0.9963$, and $\text{MAE} = 0.6187$ (with sub-level residuals arising strictly from 8-bit RGB--YCrCb quantization), confirming near-lossless numerical fidelity ($>40\text{ dB}$) and zero geometric distortion of segmentation masks.
 
 \begin{table}[t]
 \centering
-\caption{Numerical Preservation of Identity Frequency Roundtrips Across 2,676 RGB MVTec AD Images}
+\caption{Numerical Preservation of Identity Frequency Roundtrips Across All 2,292 Unique RGB MVTec AD Images}
 \label{tab:reconstruction_metrics}
+\setlength{\tabcolsep}{4pt}
 \begin{tabular}{l c c c c}
 \toprule
-\textbf{Transform} & \textbf{MAE (0--255)} & \textbf{PSNR} & \textbf{SSIM} & \textbf{Preserved?} \\
+\textbf{Transform} & \textbf{MAE} $\downarrow$ & \textbf{Mean PSNR} $\uparrow$ & \textbf{Global PSNR} $\uparrow$ & \textbf{SSIM} $\uparrow$ \\
+ & \textbf{(0--255)} & \textbf{(dB)} & \textbf{(dB)} & \\
 \midrule
-2D-FFT & $0.4807$ & $51.31\text{ dB}$ & $0.9983$ & Yes ($>40\text{ dB}$) \\
-2D-DWT & $0.0000$ & $\infty$ & $1.0000$ & Exact identity \\
+2D-FFT & $0.3980$ & $52.65$ & $51.58$ & $0.9968$ \\
+2D-DWT (Haar) & $0.6187$ & $49.71$ & $49.59$ & $0.9963$ \\
 \bottomrule
+\multicolumn{5}{p{0.94\columnwidth}}{\footnotesize Evaluated on YCrCb luminance ($8$-bit \texttt{uint8}); all six categories exceed $48.7\text{ dB}$ ($>40\text{ dB}$ near-lossless threshold).}
 \end{tabular}
 \end{table}
 
 \subsection{Supervised Upper-Bound Reference (Oracle) and FAR Analysis}
-To establish an empirical upper bound on achievable polygonal segmentation accuracy and quantify false alarm scaling at high resolution, Table~\ref{tab:per_category_real} reports the performance of two \textit{supervised} YOLOv11-seg oracle models (\texttt{yolo11l-seg@640} and \texttt{yolo11x-seg@1024}, trained with real labeled defects from \cite{kudupudi2025industrial})---distinct from our defect-free training experiments in Table~\ref{tab:ablation_results}. Across our six focus categories, \texttt{yolo11l-seg@640} reaches a mean Mask AP@50 of $0.854$ (peaking at $0.995$ on \texttt{tile} and $0.967$ on \texttt{bottle}), while \texttt{yolo11x-seg@1024} reaches $0.873$. Higher spatial resolution yields pronounced gains on fine periodic textures---\texttt{carpet} rises from $0.776$ to $0.865$ ($+0.089$) and \texttt{grid} from $0.825$ to $0.870$ ($+0.045$)---confirming the sensitivity of periodic lattices to high-frequency detail. Conversely, on the 467 nominal test images across all 15 categories, \texttt{yolo11x-seg@1024} exhibits an elevated $\text{FAR@0.25}$ of $8.78\%$ (nearly double the $4.50\%$ recorded by \texttt{yolo11l-seg@640}), experimentally demonstrating the false-alarm trade-off that motivates our negative-sample invariant ($\rho_{\text{neg}} = 0.15$).
+To establish an empirical upper bound on achievable polygonal segmentation accuracy and quantify false alarm scaling at high resolution, Table~\ref{tab:per_category_real} reports the performance of two \textit{supervised} YOLOv11-seg oracle models (\texttt{yolo11l-seg@640} and \texttt{yolo11x-seg@1024}, trained with real labeled defects from \cite{kudupudi2025industrial})---distinct from our defect-free training experiments in Table~\ref{tab:ablation_results}. Across our six focus categories, \texttt{yolo11l-seg@640} reaches a mean Mask AP@50 of $0.854$ (peaking at $0.995$ on \texttt{tile} and $0.967$ on \texttt{bottle}), while \texttt{yolo11x-seg@1024} reaches $0.873$. Higher spatial resolution yields pronounced gains on fine periodic textures---\texttt{carpet} rises from $0.776$ to $0.865$ ($+0.089$) and \texttt{grid} from $0.825$ to $0.870$ ($+0.045$)---confirming the sensitivity of periodic lattices to high-frequency detail. Conversely, on the 467 nominal test images across all 15 categories, \texttt{yolo11x-seg@1024} exhibits an elevated $\text{FAR@0.25}$ of $8.78\%$ (nearly double the $4.50\%$ recorded by \texttt{yolo11l-seg@640}), experimentally demonstrating the false-alarm trade-off that motivates our negative-sample invariant ($\rho_{\text{neg}} = 0.15$). Because \texttt{yolo11l-seg@640} delivers higher 6-category $\text{AP@50-95}$ ($0.524$ vs.\ $0.520$) at nearly half the nominal false alarm rate, we standardize all controlled defect-free ablations in Table~\ref{tab:ablation_results} on this configuration.
 
 \begin{table}[t]
 \centering
 \caption{Supervised Upper-Bound Reference (Oracle) Mask AP and Nominal FAR (467 Good Parts) on MVTec AD}
 \label{tab:per_category_real}
+\setlength{\tabcolsep}{3pt}
 \begin{tabular}{l c c c c}
 \toprule
 \multirow{2}{*}{\textbf{Category}} & \multicolumn{2}{c}{\textbf{YOLOv11l-seg (640)}} & \multicolumn{2}{c}{\textbf{YOLOv11x-seg (1024)}} \\
 \cmidrule(lr){2-3} \cmidrule(lr){4-5}
- & \textbf{AP@50} & \textbf{AP@50-95} & \textbf{AP@50} & \textbf{AP@50-95} \\
+ & \textbf{AP@50} $\uparrow$ & \textbf{AP@50-95} $\uparrow$ & \textbf{AP@50} $\uparrow$ & \textbf{AP@50-95} $\uparrow$ \\
 \midrule
 \texttt{grid} (Texture)   & $0.825$ & $0.417$ & $\mathbf{0.870}$ & $0.417$ \\
 \texttt{carpet} (Texture) & $0.776$ & $0.412$ & $\mathbf{0.865}$ & $\mathbf{0.442}$ \\
@@ -83,22 +87,24 @@ To establish an empirical upper bound on achievable polygonal segmentation accur
 \textbf{6-Cat. Mean}      & $0.854$ & $\mathbf{0.524}$ & $\mathbf{0.873}$ & $0.520$ \\
 \textbf{All-15 Mean}      & $0.819$ & $\mathbf{0.482}$ & $\mathbf{0.823}$ & $0.473$ \\
 \midrule
-\textbf{FAR@0.25} (467)   & \multicolumn{2}{c}{$\mathbf{4.50\%}$} & \multicolumn{2}{c}{$8.78\%$} \\
-\textbf{FAR@0.50} (467)   & \multicolumn{2}{c}{$\mathbf{2.14\%}$} & \multicolumn{2}{c}{$2.36\%$} \\
+\textbf{FAR@0.25} $\downarrow$ & \multicolumn{2}{c}{$\mathbf{4.50\%}$} & \multicolumn{2}{c}{$8.78\%$} \\
+\textbf{FAR@0.50} $\downarrow$ & \multicolumn{2}{c}{$\mathbf{2.14\%}$} & \multicolumn{2}{c}{$2.36\%$} \\
 \bottomrule
+\multicolumn{5}{p{0.94\columnwidth}}{\footnotesize Best per-row values in \textbf{bold}. Supervised oracle checkpoints trained with real defects \cite{kudupudi2025industrial}; FAR measured on all 467 nominal test images across 15 categories.}
 \end{tabular}
 \end{table}
 
 \subsection{Controlled Defect-Free Ablation Matrix and SOTA Comparison}
-Because YOLOv11-seg requires positive polygon supervision during training, every defect-free configuration pairs a spatial anomaly synthesizer with optional frequency preprocessing and negative-sample balancing. Table~\ref{tab:ablation_results} defines our 12-configuration controlled ablation matrix (\texttt{EXP-00}--\texttt{EXP-11}) under the strict defect-free training regime, systematically isolating the negative-sample invariant (\texttt{EXP-00} vs. \texttt{EXP-01}), spatial synthesizers (\texttt{EXP-01}--\texttt{EXP-03}), frequency operators (\texttt{EXP-04}--\texttt{EXP-07}), and MVTec-AD-C optical robustness (\texttt{EXP-08}--\texttt{EXP-11}). End-to-end pipeline dry-run verification confirms dual-domain metric and data-isolation integrity, while full 100-epoch A100 sweeps (\texttt{EXP-00}--\texttt{EXP-11}) are structured for direct population upon completion.
+Because YOLOv11-seg requires positive polygon supervision during training, every defect-free configuration pairs a spatial anomaly synthesizer with optional frequency preprocessing and negative-sample balancing. Table~\ref{tab:ablation_results} defines our streamlined 9-configuration controlled ablation matrix (\texttt{EXP-00}--\texttt{EXP-08}) under the strict defect-free training regime, systematically isolating the negative-sample invariant (\texttt{EXP-00} vs. \texttt{EXP-01}), spatial synthesizers (\texttt{EXP-01}--\texttt{EXP-03}), frequency operators (\texttt{EXP-04}--\texttt{EXP-07}), and the full inter-domain system (\texttt{EXP-08}), with Texture vs. Object group breakdowns logged directly by our dual-domain evaluator. Rather than training redundant duplicates for optical robustness, the trained \texttt{EXP-01} and \texttt{EXP-05} checkpoints are evaluated directly under MVTec-AD-C corruptions in Table~\ref{tab:corruption_table}.
 
 \begin{table*}[t]
 \centering
-\caption{Controlled 12-Experiment Defect-Free Ablation Protocol (\texttt{EXP-00}--\texttt{EXP-11}) on MVTec AD}
+\caption{Controlled 9-Experiment Defect-Free Ablation Protocol (\texttt{EXP-00}--\texttt{EXP-08}) Using \texttt{YOLOv11l-seg} ($640\times 640$) on MVTec AD}
 \label{tab:ablation_results}
+\setlength{\tabcolsep}{5pt}
 \begin{tabular}{l l c c c c c c c}
 \toprule
-\textbf{Exp. ID} & \textbf{Synthesizer} & \textbf{Freq. Filter} & \textbf{$\rho_{\text{neg}}$} & \textbf{mAP@50} & \textbf{mAP@50-95} & \textbf{Px-AUROC} & \textbf{Im-AUROC} & \textbf{FAR@0.25} \\
+\textbf{Exp. ID} & \textbf{Synthesizer} & \textbf{Freq. Filter} & \textbf{$\rho_{\text{neg}}$} & \textbf{mAP@50} $\uparrow$ & \textbf{mAP@50-95} $\uparrow$ & \textbf{Px-AUROC} $\uparrow$ & \textbf{Im-AUROC} $\uparrow$ & \textbf{FAR@0.25} $\downarrow$ \\
 \midrule
 \texttt{EXP-00} & CutPaste (Base) & None & $0.00$ & -- & -- & -- & -- & -- \\
 \texttt{EXP-01} & CutPaste & None & $0.15$ & -- & -- & -- & -- & -- \\
@@ -108,34 +114,32 @@ Because YOLOv11-seg requires positive polygon supervision during training, every
 \texttt{EXP-05} & CutPaste (Base) & 2D-DWT Boost & $0.15$ & -- & -- & -- & -- & -- \\
 \texttt{EXP-06} & DRAEM Perlin & 2D-FFT Notch & $0.15$ & -- & -- & -- & -- & -- \\
 \texttt{EXP-07} & NSA Poisson & 2D-DWT Boost & $0.15$ & -- & -- & -- & -- & -- \\
-\texttt{EXP-08} & CutPaste (MVTec-AD-C) & None & $0.15$ & -- & -- & -- & -- & -- \\
-\texttt{EXP-09} & DRAEM/NSA (MVTec-AD-C) & None & $0.15$ & -- & -- & -- & -- & -- \\
-\texttt{EXP-10} & CutPaste (MVTec-AD-C) & 2D-DWT Boost & $0.15$ & -- & -- & -- & -- & -- \\
-\texttt{EXP-11} & Full Inter-Domain System & Adaptive FFT/DWT & $0.15$ & -- & -- & -- & -- & -- \\
+\texttt{EXP-08} & Full Inter-Domain System & Adaptive FFT/DWT & $0.15$ & -- & -- & -- & -- & -- \\
 \bottomrule
-\multicolumn{9}{l}{\footnotesize Note: Cells marked `--' are reserved for completed 100-epoch NVIDIA A100-SXM4 training sweeps.}
+\multicolumn{9}{l}{\footnotesize Note: Cells marked `--' are reserved for completed 100-epoch GPU sweeps; Texture vs. Object group means are reported alongside overall metrics.}
 \end{tabular}
 \end{table*}
 
-Table~\ref{tab:sota_comparison} further positions our integrated system (\texttt{EXP-11}) against representative unsupervised anomaly detection baselines on MVTec AD reported in prior literature, contrasting anomaly localization metrics (Image/Pixel-AUROC), output representation (coarse heatmap vs. vector-ready polygon), and inference throughput.
+Table~\ref{tab:sota_comparison} further positions our integrated system (\texttt{EXP-08}) against representative unsupervised anomaly detection baselines on MVTec AD reported in prior literature, contrasting anomaly localization metrics (Image/Pixel-AUROC), output representation (coarse heatmap vs. vector-ready polygon), and inference throughput.
 
 \begin{table}[t]
 \centering
 \caption{Comparison Against External Unsupervised SOTA Baselines on MVTec AD}
 \label{tab:sota_comparison}
-\setlength{\tabcolsep}{4pt}
+\setlength{\tabcolsep}{3.5pt}
 \begin{tabular}{l c c c c}
 \toprule
-\textbf{Method} & \textbf{Im-AUROC} & \textbf{Px-AUROC} & \textbf{Output} & \textbf{FPS} \\
+\textbf{Method} & \textbf{Im-AUROC} $\uparrow$ & \textbf{Px-AUROC} $\uparrow$ & \textbf{Output} & \textbf{FPS} $\uparrow$ \\
+ & \textbf{(\%)} & \textbf{(\%)} & & \\
 \midrule
-PaDiM \cite{defard2021padim} & $97.9\%$ & $97.5\%$ & Heatmap & $10$--$25$ \\
-DRAEM \cite{zavrtanik2021draem} & $98.0\%$ & $94.7\%$ & Heatmap & $20$--$40$ \\
-PatchCore \cite{roth2022towards} & $99.1\%$ & $98.1\%$ & Heatmap & $5$--$12$ \\
-SimpleNet \cite{liu2023simplenet} & $99.6\%$ & $98.1\%$ & Heatmap & $\sim 77$ \\
+PaDiM \cite{defard2021padim} & $97.9$ & $97.5$ & Heatmap & $10$--$25$ \\
+DRAEM \cite{zavrtanik2021draem} & $98.0$ & $94.7$ & Heatmap & $20$--$40$ \\
+PatchCore \cite{roth2022towards} & $99.1$ & $98.1$ & Heatmap & $5$--$12$ \\
+SimpleNet \cite{liu2023simplenet} & $99.6$ & $98.1$ & Heatmap & $\sim 77$ \\
 \midrule
-\textbf{Ours (\texttt{EXP-11})} & -- & -- & \textbf{Polygon} & $\mathbf{149.2}^\dagger$ \\
+\textbf{Ours (\texttt{EXP-08})} & -- & -- & \textbf{Polygon} & $\mathbf{149.2}^\dagger$ \\
 \bottomrule
-\multicolumn{5}{p{0.94\columnwidth}}{\footnotesize External metrics from original papers (15 categories, $256^2$); $^\dagger$TensorRT FP16 backbone at $1024^2$.}
+\multicolumn{5}{p{0.94\columnwidth}}{\footnotesize External metrics from original papers (15 categories, $256^2$); Ours (\texttt{EXP-08}) evaluated on 6 focus categories at $640^2$; $^\dagger$TensorRT FP16 backbone at $1024^2$.}
 \end{tabular}
 \end{table}
 
@@ -158,7 +162,7 @@ Fig.~\ref{fig:visual_inspection} compares all three spatial anomaly synthesizers
 
 \subsection{Optical Robustness under MVTec-AD-C}
 \label{subsec:robustness}
-Industrial inspection cameras routinely encounter harsh optical degradations from conveyor vibration, thermal lens drift, and low-light sensor noise. Following the common image-corruption framework of ImageNet-C \cite{hendrycks2019robustness} and its industrial MVTec-AD-C protocol \cite{chen2023mvtecadc}, we evaluate segmentation stability across four perturbations---Gaussian Noise, Gaussian Blur, Motion Blur, and Defocus Blur---over severity levels $1$ through $5$. Fig.~\ref{fig:defocus_progression} illustrates progressive high-frequency edge attenuation under defocus blur on \texttt{bottle}. Table~\ref{tab:corruption_table} defines the quantitative stress-testing matrix comparing the clean baseline (\texttt{EXP-08}) against Haar 2D-DWT detail boosting (\texttt{EXP-10}) across low-to-moderate (Sev 1--3) and severe (Sev 4--5) tiers; exact degraded metrics will be populated directly from completed A100 sweeps.
+Industrial inspection cameras routinely encounter harsh optical degradations from conveyor vibration, thermal lens drift, and low-light sensor noise. Following the common image-corruption framework of ImageNet-C \cite{hendrycks2019robustness} and its industrial MVTec-AD-C protocol \cite{chen2023mvtecadc}, we evaluate segmentation stability across four perturbations---Gaussian Noise, Gaussian Blur, Motion Blur, and Defocus Blur---over severity levels $1$ through $5$. Fig.~\ref{fig:defocus_progression} illustrates progressive high-frequency edge attenuation under defocus blur on \texttt{bottle}. Table~\ref{tab:corruption_table} defines the quantitative stress-testing matrix comparing the clean spatial baseline (\texttt{EXP-01}) against Haar 2D-DWT detail boosting (\texttt{EXP-05}) across low-to-moderate (Sev 1--3) and severe (Sev 4--5) tiers; exact degraded metrics will be populated directly from completed GPU sweeps.
 
 \begin{figure}[t]
 \centering
@@ -169,11 +173,12 @@ Industrial inspection cameras routinely encounter harsh optical degradations fro
 
 \begin{table}[t]
 \centering
-\caption{MVTec-AD-C Optical Robustness Matrix (Mask mAP@50 Across Severity Tiers 1--3 and 4--5)}
+\caption{MVTec-AD-C Optical Robustness Matrix (Mask mAP@50 $\uparrow$ Across Severity Tiers 1--3 and 4--5)}
 \label{tab:corruption_table}
+\setlength{\tabcolsep}{4pt}
 \begin{tabular}{l c c c c}
 \toprule
-\multirow{2}{*}{\textbf{Corruption Type}} & \multicolumn{2}{c}{\textbf{Baseline (\texttt{EXP-08})}} & \multicolumn{2}{c}{\textbf{+2D-DWT (\texttt{EXP-10})}} \\
+\multirow{2}{*}{\textbf{Corruption Type}} & \multicolumn{2}{c}{\textbf{Baseline (\texttt{EXP-01})}} & \multicolumn{2}{c}{\textbf{+2D-DWT (\texttt{EXP-05})}} \\
 \cmidrule(lr){2-3} \cmidrule(lr){4-5}
  & \textbf{Sev 1--3} & \textbf{Sev 4--5} & \textbf{Sev 1--3} & \textbf{Sev 4--5} \\
 \midrule
@@ -182,10 +187,10 @@ Gaussian Blur  & -- & -- & -- & -- \\
 Motion Blur    & -- & -- & -- & -- \\
 Defocus Blur   & -- & -- & -- & -- \\
 \midrule
-\textbf{Mean mAP@50} & -- & -- & -- & -- \\
-\textbf{Mean FAR@0.25} & -- & -- & -- & -- \\
+\textbf{Mean mAP@50} $\uparrow$ & -- & -- & -- & -- \\
+\textbf{Mean FAR@0.25} $\downarrow$ & -- & -- & -- & -- \\
 \bottomrule
-\multicolumn{5}{l}{\footnotesize `--': Reserved for completed A100 MVTec-AD-C sweeps.}
+\multicolumn{5}{p{0.94\columnwidth}}{\footnotesize Evaluated with \texttt{YOLOv11l-seg} ($640\times 640$); `--' reserved for completed GPU MVTec-AD-C sweeps.}
 \end{tabular}
 \end{table}
 
@@ -197,17 +202,19 @@ To verify that the single-stage polygonal segmentation backbone satisfies practi
 \centering
 \caption{Inference Latency and End-to-End Throughput on $1024 \times 1024$ Frames (NVIDIA A100-SXM4)}
 \label{tab:edge_benchmarks}
-\setlength{\tabcolsep}{4pt}
+\setlength{\tabcolsep}{3.5pt}
 \begin{tabular}{l c c c l}
 \toprule
-\textbf{Stage / Runtime} & \textbf{Prec.} & \textbf{Latency} & \textbf{FPS} & \textbf{Viability} \\
+\textbf{Stage / Runtime} & \textbf{Prec.} & \textbf{Latency} $\downarrow$ & \textbf{FPS} $\uparrow$ & \textbf{Viability} \\
+ & & \textbf{(ms)} & & \\
 \midrule
-PyTorch CPU (Backbone) & FP32 & $184.2\text{ ms}$ & $5.4$ & Offline only \\
-PyTorch GPU (Backbone) & FP16 & $32.4\text{ ms}$ & $30.8$ & Offline audit \\
-\textbf{TensorRT C++ (Backbone)} & \textbf{FP16} & \textbf{6.7 ms} & \textbf{149.2} & \textbf{Inline ready} \\
+PyTorch CPU (Backbone) & FP32 & $184.2$ & $5.4$ & Offline only \\
+PyTorch GPU (Backbone) & FP16 & $32.4$ & $30.8$ & Offline audit \\
+\textbf{TensorRT C++ (Backbone)} & \textbf{FP16} & $\mathbf{6.7}$ & $\mathbf{149.2}$ & \textbf{Inline ready} \\
 \midrule
 Freq. Preproc. ($\mathcal{T}_{\text{freq}}$ GPU) & FP32 & -- & -- & Pending \\
 End-to-End ($\mathcal{T}_{\text{freq}}$+TRT) & FP16 & -- & -- & Pending \\
 \bottomrule
+\multicolumn{5}{p{0.94\columnwidth}}{\footnotesize Prec.: numerical precision; TRT: TensorRT 10.x; `--' reserved for GPU \texttt{cuFFT}/Haar DWT micro-benchmarks.}
 \end{tabular}
 \end{table}
