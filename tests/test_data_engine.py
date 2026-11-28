@@ -420,3 +420,53 @@ class TestNineExperimentProtocol:
 
         assert np.array_equal(out_a.image, out_b.image)
         assert np.array_equal(out_a.mask, out_b.mask)
+
+    def test_all_nine_configs_smoke_on_real_mvtec_images(self, tmp_path):
+        """
+        Smoke-tests all 9 YAML configs (EXP-00 to EXP-08: CutPaste, DRAEM, NSA,
+        2D-FFT, 2D-DWT, Material-Adaptive) on real multi-resolution MVTec AD images
+        (e.g., 900x900 bottle, 840x840 tile, 800x800 pill, 1024x1024 grid/carpet/screw).
+        """
+        import glob
+        import os
+        import cv2
+        from data_engine.exporters.yolo_seg_exporter import YOLOSegExporter
+        from experiments.run_experiment import build_pipelines_from_config, load_yaml
+
+        mvtec_root = "mvtec_ad"
+        cats = ["grid", "carpet", "tile", "screw", "pill", "bottle"]
+        if not all(os.path.isdir(os.path.join(mvtec_root, c, "train", "good")) for c in cats):
+            pytest.skip("Local mvtec_ad 6-category dataset not present")
+
+        # Load 1 real train/good image per category
+        base_samples = []
+        for cat in cats:
+            good_dir = os.path.join(mvtec_root, cat, "train", "good")
+            first_img = sorted(f for f in os.listdir(good_dir) if f.lower().endswith((".png", ".jpg")))[0]
+            img_path = os.path.join(good_dir, first_img)
+            img_rgb = cv2.cvtColor(cv2.imread(img_path), cv2.COLOR_BGR2RGB)
+            base_samples.append(Sample(image=img_rgb, category=cat, defect_type="good", is_anomaly=False, image_path=img_path))
+
+        category_map = {cat: idx for idx, cat in enumerate(sorted(cats))}
+        for cfg_path in sorted(glob.glob(os.path.join("configs", "experiments", "*.yaml"))):
+            cfg = load_yaml(cfg_path)
+            exp_id = cfg["experiment_id"]
+            train_pipe, eval_pipe = build_pipelines_from_config(cfg["data_engine"], seed=42)
+
+            in_train = [s.clone() for s in base_samples]
+            out_train = train_pipe.run(in_train)
+            assert len(out_train) == 6
+            for orig, proc in zip(base_samples, out_train):
+                assert proc.image.shape == orig.image.shape, f"{exp_id} shape mismatch on {orig.category}"
+                assert proc.image.dtype == np.uint8
+                assert proc.mask.shape == orig.image.shape[:2]
+
+            exp_out_dir = str(tmp_path / exp_id)
+            exporter = YOLOSegExporter(output_dir=exp_out_dir, category_map=category_map, save_debug_masks=False)
+            exporter.export(out_train, split="train")
+            assert os.path.exists(os.path.join(exp_out_dir, "dataset.yaml"))
+
+            if len(eval_pipe) > 0:
+                out_eval = eval_pipe.run([s.clone() for s in base_samples])
+                assert len(out_eval) == 6
+                assert all(not s.is_anomaly for s in out_eval)

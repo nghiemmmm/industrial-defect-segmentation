@@ -6,8 +6,10 @@ Outputs degradation curves to CSV and JSON for scientific analysis and plotting.
 """
 
 from typing import Dict, Any, List, Optional
+import gc
 import os
 import json
+import cv2
 import pandas as pd
 import numpy as np
 
@@ -37,6 +39,13 @@ class RobustnessEvaluator:
         self.output_dir = output_dir
         os.makedirs(output_dir, exist_ok=True)
 
+    @staticmethod
+    def _downsample_for_eval(arr: np.ndarray, max_size: int = 256, is_mask: bool = False) -> np.ndarray:
+        if max_size and (arr.shape[0] > max_size or arr.shape[1] > max_size):
+            interp = cv2.INTER_NEAREST if is_mask else cv2.INTER_LINEAR
+            return cv2.resize(arr, (max_size, max_size), interpolation=interp)
+        return arr
+
     def evaluate_corrupted_batch(
         self,
         images: List[np.ndarray],
@@ -44,35 +53,41 @@ class RobustnessEvaluator:
         corruption_type: str,
         severity: int,
         predict_fn,  # callable(img) -> (anomaly_map, max_conf)
+        max_eval_size: int = 256,
     ) -> Dict[str, Any]:
         """
-        Applies corruption of specified type and severity to all images,
-        runs predictions, and computes degradation metrics.
+        Streams corruption one image at a time (avoiding 2GB+ RAM copies on Colab T4),
+        runs predictions, and computes degradation metrics including Mask mAP@50 & FAR@0.25.
         """
-        corrupted_images = [apply_corruption(img, corruption_type, severity) for img in images]
-
         pred_maps = []
+        eval_gt_masks = []
         pred_confs = []
         gt_is_anomaly = []
+        ious = []
 
-        for c_img, gt_m in zip(corrupted_images, gt_masks):
+        for img, gt_m in zip(images, gt_masks):
+            c_img = apply_corruption(img, corruption_type, severity)
             a_map, conf = predict_fn(c_img)
-            pred_maps.append(a_map)
-            pred_confs.append(conf)
-            gt_is_anomaly.append(1 if np.any(gt_m > 0) else 0)
+            del c_img
+
+            gt_ds = self._downsample_for_eval(np.asarray(gt_m, dtype=np.uint8), max_eval_size, is_mask=True)
+            am_ds = self._downsample_for_eval(np.asarray(a_map, dtype=np.float32), max_eval_size, is_mask=False)
+            pred_maps.append(am_ds)
+            eval_gt_masks.append(gt_ds)
+            pred_confs.append(float(conf))
+            gt_is_anomaly.append(1 if np.any(gt_ds > 0) else 0)
+            ious.append(compute_mask_iou((am_ds >= 0.5).astype(np.uint8) * 255, gt_ds))
 
         # Compute metrics under corruption (including Mask mAP@50 & FAR@0.25 for Table V)
-        pixel_auroc = compute_pixel_auroc(gt_masks, pred_maps)
+        pixel_auroc = compute_pixel_auroc(eval_gt_masks, pred_maps, max_eval_size=max_eval_size)
         image_auroc = compute_image_auroc(gt_is_anomaly, pred_confs)
-        mask_map50 = compute_mask_ap50(gt_masks, pred_maps, pred_confs)
+        mask_map50 = compute_mask_ap50(eval_gt_masks, pred_maps, pred_confs)
         good_confs = [c for c, is_anom in zip(pred_confs, gt_is_anomaly) if is_anom == 0]
         far_025 = compute_false_alarm_rate(good_confs, conf_threshold=0.25)
-
-        ious = []
-        for p_m, g_m in zip(pred_maps, gt_masks):
-            p_bin = (p_m >= 0.5).astype(np.uint8) * 255
-            ious.append(compute_mask_iou(p_bin, g_m))
         mean_iou = float(np.mean(ious)) if ious else 0.0
+
+        del pred_maps, eval_gt_masks
+        gc.collect()
 
         return {
             "corruption": corruption_type,
@@ -96,21 +111,30 @@ class RobustnessEvaluator:
         """
         records = []
 
-        # Baseline clean run (severity = 0)
+        # Baseline clean run (severity = 0) with 256x256 downsampled eval buffers
         clean_maps = []
+        clean_gt_masks = []
         clean_confs = []
-        gt_is_anomaly = [1 if np.any(m > 0) else 0 for m in gt_masks]
-        for img in images:
+        gt_is_anomaly = []
+        clean_ious = []
+        for img, gt_m in zip(images, gt_masks):
             a_map, conf = predict_fn(img)
-            clean_maps.append(a_map)
-            clean_confs.append(conf)
+            gt_ds = self._downsample_for_eval(np.asarray(gt_m, dtype=np.uint8), 256, is_mask=True)
+            am_ds = self._downsample_for_eval(np.asarray(a_map, dtype=np.float32), 256, is_mask=False)
+            clean_maps.append(am_ds)
+            clean_gt_masks.append(gt_ds)
+            clean_confs.append(float(conf))
+            gt_is_anomaly.append(1 if np.any(gt_ds > 0) else 0)
+            clean_ious.append(compute_mask_iou((am_ds >= 0.5).astype(np.uint8) * 255, gt_ds))
 
-        clean_p_auroc = compute_pixel_auroc(gt_masks, clean_maps)
+        clean_p_auroc = compute_pixel_auroc(clean_gt_masks, clean_maps, max_eval_size=256)
         clean_i_auroc = compute_image_auroc(gt_is_anomaly, clean_confs)
-        clean_map50 = compute_mask_ap50(gt_masks, clean_maps, clean_confs)
+        clean_map50 = compute_mask_ap50(clean_gt_masks, clean_maps, clean_confs)
         clean_good_confs = [c for c, is_anom in zip(clean_confs, gt_is_anomaly) if is_anom == 0]
         clean_far_025 = compute_false_alarm_rate(clean_good_confs, conf_threshold=0.25)
-        clean_iou = float(np.mean([compute_mask_iou((m >= 0.5).astype(np.uint8) * 255, gm) for m, gm in zip(clean_maps, gt_masks)]))
+        clean_iou = float(np.mean(clean_ious)) if clean_ious else 0.0
+        del clean_maps, clean_gt_masks
+        gc.collect()
 
         records.append({
             "experiment": experiment_id,
