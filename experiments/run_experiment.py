@@ -345,6 +345,8 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="Dry-run without training heavy model")
     parser.add_argument("--device", type=str, default="", help="Device override (e.g. '0', 'cpu')")
     parser.add_argument("--seed", type=int, default=None, help="Random seed override for multi-seed variance analysis")
+    parser.add_argument("--eval-only", action="store_true", help="Skip training and evaluate an existing checkpoint")
+    parser.add_argument("--weights", type=str, default="", help="Checkpoint path for --eval-only mode")
     args = parser.parse_args()
 
     cfg = load_yaml(args.config)
@@ -430,27 +432,6 @@ def main():
         defect_free=defect_free_mode,
     )
 
-    # Clean stale processed_dir to prevent duplicate image accumulation across retries
-    if os.path.exists(processed_dir):
-        logger.info(f"Cleaning existing processed dataset directory: {processed_dir}")
-        shutil.rmtree(processed_dir)
-
-    # Stream per category to keep peak RAM low (<1.5 GB) and guarantee fixed class IDs
-    category_map = {cat: idx for idx, cat in enumerate(sorted(categories))}
-    exporter = YOLOSegExporter(output_dir=processed_dir, category_map=category_map, save_debug_masks=False)
-    for cat in categories:
-        train_samples = loader.load(categories=[cat], split="train")
-        processed_train = train_pipeline.run(train_samples)
-        exporter.export(processed_train, split="train")
-        del train_samples, processed_train
-
-        val_samples = loader.load(categories=[cat], split="val")
-        processed_val = train_pipeline.run(val_samples)
-        exporter.export(processed_val, split="val")
-        del val_samples, processed_val
-        gc.collect()
-
-    # Launch Ultralytics YOLOv11-seg training with standardized optimizer & absolute save_dir
     from ultralytics import YOLO
     model_cfg = cfg.get("model", {})
     weights = model_cfg.get("weights", "yolo11l-seg.pt")
@@ -459,35 +440,63 @@ def main():
     batch = model_cfg.get("batch", 16)
     abs_out_dir = os.path.abspath(out_dir)
 
-    logger.info(f"Launching YOLOv11-seg training: {weights} on {device} -> {abs_out_dir}/train_run")
-    yolo_model = YOLO(weights)
-    yolo_model.train(
-        data=os.path.join(processed_dir, "dataset.yaml"),
-        epochs=epochs,
-        imgsz=imgsz,
-        batch=batch,
-        workers=2,
-        device=device,
-        seed=active_seed,
-        optimizer=model_cfg.get("optimizer", "AdamW"),
-        lr0=float(model_cfg.get("lr0", 0.001)),
-        cos_lr=bool(model_cfg.get("cos_lr", True)),
-        deterministic=True,
-        cache=model_cfg.get("cache", False),
-        project=abs_out_dir,
-        name="train_run",
-        exist_ok=True,
-    )
+    if args.eval_only:
+        best_weights = args.weights or os.path.join(abs_out_dir, "train_run", "weights", "best.pt")
+        if not os.path.exists(best_weights):
+            logger.error(f"--eval-only checkpoint not found: {best_weights}")
+            sys.exit(1)
+        logger.info(f"[EVAL-ONLY] Skipping training; loading checkpoint: {best_weights}")
+    else:
+        # Clean stale processed_dir to prevent duplicate image accumulation across retries
+        if os.path.exists(processed_dir):
+            logger.info(f"Cleaning existing processed dataset directory: {processed_dir}")
+            shutil.rmtree(processed_dir)
 
-    save_dir = (
-        str(yolo_model.trainer.save_dir)
-        if getattr(yolo_model, "trainer", None) is not None
-        else os.path.join(abs_out_dir, "train_run")
-    )
-    best_weights = os.path.join(save_dir, "weights", "best.pt")
-    logger.info(f"Resolved training save_dir={save_dir} | best_weights_exists={os.path.exists(best_weights)}")
-    del yolo_model
-    gc.collect()
+        # Stream per category to keep peak RAM low (<1.5 GB) and guarantee fixed class IDs
+        category_map = {cat: idx for idx, cat in enumerate(sorted(categories))}
+        exporter = YOLOSegExporter(output_dir=processed_dir, category_map=category_map, save_debug_masks=False)
+        for cat in categories:
+            train_samples = loader.load(categories=[cat], split="train")
+            processed_train = train_pipeline.run(train_samples)
+            exporter.export(processed_train, split="train")
+            del train_samples, processed_train
+
+            val_samples = loader.load(categories=[cat], split="val")
+            processed_val = train_pipeline.run(val_samples)
+            exporter.export(processed_val, split="val")
+            del val_samples, processed_val
+            gc.collect()
+
+        # Launch Ultralytics YOLOv11-seg training with standardized optimizer & absolute save_dir
+        logger.info(f"Launching YOLOv11-seg training: {weights} on {device} -> {abs_out_dir}/train_run")
+        yolo_model = YOLO(weights)
+        yolo_model.train(
+            data=os.path.join(processed_dir, "dataset.yaml"),
+            epochs=epochs,
+            imgsz=imgsz,
+            batch=batch,
+            workers=2,
+            device=device,
+            seed=active_seed,
+            optimizer=model_cfg.get("optimizer", "AdamW"),
+            lr0=float(model_cfg.get("lr0", 0.001)),
+            cos_lr=bool(model_cfg.get("cos_lr", True)),
+            deterministic=True,
+            cache=model_cfg.get("cache", False),
+            project=abs_out_dir,
+            name="train_run",
+            exist_ok=True,
+        )
+
+        save_dir = (
+            str(yolo_model.trainer.save_dir)
+            if getattr(yolo_model, "trainer", None) is not None
+            else os.path.join(abs_out_dir, "train_run")
+        )
+        best_weights = os.path.join(save_dir, "weights", "best.pt")
+        logger.info(f"Resolved training save_dir={save_dir} | best_weights_exists={os.path.exists(best_weights)}")
+        del yolo_model
+        gc.collect()
 
     # Load best checkpoint and isolated real test split ONLY after training finishes
     eval_model = YOLO(best_weights) if os.path.exists(best_weights) else YOLO(weights)
